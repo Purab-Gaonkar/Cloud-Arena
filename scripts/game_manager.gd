@@ -1,4 +1,4 @@
-﻿## game_manager.gd -- Match and spawn manager.
+## game_manager.gd -- Match and spawn manager.
 ## LOCAL MODE: Both players spawned immediately, no networking.
 ## NETWORK MODE: Listens for peer connections.
 extends Node2D
@@ -6,8 +6,8 @@ extends Node2D
 var local_mode: bool = true
 
 const SPAWN_POINTS: Array[Vector2] = [
-	Vector2(-220.0, 0.0),
-	Vector2( 220.0, 0.0),
+	Vector2(-600.0, 0.0),
+	Vector2( 600.0, 0.0),
 ]
 
 var _players: Array = []
@@ -56,8 +56,8 @@ func _setup_platform() -> void:
 		pt.name           = "PlatformTex"
 		pt.texture        = load("res://assets/platform.svg")
 		pt.stretch_mode   = TextureRect.STRETCH_TILE
-		pt.size           = Vector2(1000, 40)
-		pt.position       = Vector2(-500, -20)
+		pt.size           = Vector2(3000, 40)
+		pt.position       = Vector2(-1500, -20)
 		pt.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
 		floor_node.add_child(pt)
 

@@ -1,4 +1,4 @@
-﻿## player_controller.gd -- Fighting character controller.
+## player_controller.gd -- Fighting character controller.
 ## LOCAL MODE: both players on same machine, no networking.
 ## NETWORK MODE: server-authoritative RPC input.
 extends CharacterBody2D
@@ -194,10 +194,11 @@ func apply_damage(amount: int) -> void:
 
 func _on_ko() -> void:
 	current_state = State.KO
+	_update_visuals()
 	set_physics_process(false)
 	print("[Player %d] KO!" % player_index)
 	await get_tree().create_timer(3.5).timeout
-	var gm = get_tree().root.get_node_or_null("Game")
+	var gm = get_tree().current_scene
 	if gm and gm.has_method("end_round"):
 		gm.end_round(player_index)
 
