@@ -1,0 +1,54 @@
+# ── Cloud Run Service — Game Server ──────────────────────────────────────────
+# Declarative Cloud Run YAML (apply with: gcloud run services replace game-server.yaml)
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: cloud-arena-game-server
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Allow up to 100 concurrent WebSocket connections per instance
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"   # Keep CPU allocated (needed for WS)
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 3600   # Long timeout for persistent WebSocket connections
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/cloud-arena/game-server:latest
+          ports:
+            - name: h2c         # Cloud Run WebSocket requires HTTP/2 cleartext
+              containerPort: 8765
+          env:
+            - name: REDIS_URL
+              value: "redis://REDIS_HOST:6379"
+            - name: PORT
+              value: "8765"
+            - name: HEALTH_PORT
+              value: "8766"
+            - name: MAX_ROOMS
+              value: "50"
+            - name: MAX_PLAYERS_ROOM
+              value: "4"
+          resources:
+            limits:
+              cpu:    "1"
+              memory: "512Mi"
+          # Cloud Run health check
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8766
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8766
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 6

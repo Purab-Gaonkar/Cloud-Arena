@@ -1,0 +1,5 @@
+# Replace with your actual GCP project ID
+project_id = "your-gcp-project-id"
+
+# Optional: override the default region (us-central1)
+# region = "us-west1"
