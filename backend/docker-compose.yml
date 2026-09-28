@@ -1,0 +1,170 @@
+# ── CloudArena Backend — Docker Compose ──────────────────────────────────────
+#
+# Services:
+#   redis            — Shared session state
+#   game-server-1/2  — Two WebSocket game server replicas
+#   matchmaking-api-1/2 — Two FastAPI REST replicas
+#   nginx            — Load balancer / reverse proxy (public entry point)
+#
+# Usage:
+#   docker compose up --build        # Start everything
+#   docker compose up --scale game-server=3  # Override replica count
+#   docker compose down -v           # Tear down + remove volumes
+#
+# Ports exposed to host:
+#   8080  → NGINX (WebSocket at ws://localhost:8080/ws, API at http://localhost:8080/api/)
+#   6379  → Redis (direct debug access)
+
+version: "3.9"
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  cloud-arena-net:
+    driver: bridge
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  redis-data:
+
+# ── Services ──────────────────────────────────────────────────────────────────
+services:
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: cloud-arena-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - cloud-arena-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Game Server — Instance 1 ───────────────────────────────────────────────
+  game-server-1:
+    build:
+      context: ./game_server
+      dockerfile: Dockerfile
+    container_name: cloud-arena-game-1
+    restart: unless-stopped
+    environment:
+      REDIS_URL:        "redis://redis:6379"
+      PORT:             "8765"
+      HEALTH_PORT:      "8766"
+      SERVER_ID:        "gs-1"
+      MAX_ROOMS:        "50"
+      MAX_PLAYERS_ROOM: "4"
+    networks:
+      - cloud-arena-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8766/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Game Server — Instance 2 ───────────────────────────────────────────────
+  game-server-2:
+    build:
+      context: ./game_server
+      dockerfile: Dockerfile
+    container_name: cloud-arena-game-2
+    restart: unless-stopped
+    environment:
+      REDIS_URL:        "redis://redis:6379"
+      PORT:             "8765"
+      HEALTH_PORT:      "8766"
+      SERVER_ID:        "gs-2"
+      MAX_ROOMS:        "50"
+      MAX_PLAYERS_ROOM: "4"
+    networks:
+      - cloud-arena-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8766/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Matchmaking API — Instance 1 ──────────────────────────────────────────
+  matchmaking-api-1:
+    build:
+      context: ./matchmaking_api
+      dockerfile: Dockerfile
+    container_name: cloud-arena-api-1
+    restart: unless-stopped
+    environment:
+      REDIS_URL:           "redis://redis:6379"
+      GAME_SERVER_WS_HOST: "ws://localhost:8080/ws"
+    networks:
+      - cloud-arena-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Matchmaking API — Instance 2 ──────────────────────────────────────────
+  matchmaking-api-2:
+    build:
+      context: ./matchmaking_api
+      dockerfile: Dockerfile
+    container_name: cloud-arena-api-2
+    restart: unless-stopped
+    environment:
+      REDIS_URL:           "redis://redis:6379"
+      GAME_SERVER_WS_HOST: "ws://localhost:8080/ws"
+    networks:
+      - cloud-arena-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── NGINX Load Balancer ───────────────────────────────────────────────────
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: cloud-arena-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    networks:
+      - cloud-arena-net
+    depends_on:
+      game-server-1:
+        condition: service_healthy
+      game-server-2:
+        condition: service_healthy
+      matchmaking-api-1:
+        condition: service_healthy
+      matchmaking-api-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

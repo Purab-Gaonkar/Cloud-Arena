@@ -1,0 +1,36 @@
+# ── Cloud Run Service — Matchmaking API ──────────────────────────────────────
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: cloud-arena-matchmaking-api
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "5"
+    spec:
+      containerConcurrency: 200
+      timeoutSeconds: 30
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/cloud-arena/matchmaking-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_URL
+              value: "redis://REDIS_HOST:6379"
+            - name: GAME_SERVER_WS_HOST
+              value: "wss://GAME_SERVER_CLOUD_RUN_URL"
+          resources:
+            limits:
+              cpu:    "1"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30

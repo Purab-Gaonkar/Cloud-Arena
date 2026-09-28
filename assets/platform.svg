@@ -1,0 +1,13 @@
+<svg width="128" height="128" xmlns="http://www.w3.org/2000/svg">
+  <rect width="128" height="128" fill="#8B4513" />
+  <rect width="128" height="24" fill="#2ECC71" />
+  <polygon points="10,24 15,35 20,24" fill="#2ECC71" />
+  <polygon points="30,24 38,40 46,24" fill="#2ECC71" />
+  <polygon points="70,24 74,32 78,24" fill="#2ECC71" />
+  <polygon points="100,24 105,45 110,24" fill="#2ECC71" />
+  <!-- Dirt details -->
+  <rect x="20" y="50" width="8" height="4" fill="#654321" />
+  <rect x="80" y="80" width="12" height="6" fill="#654321" />
+  <rect x="40" y="100" width="10" height="5" fill="#654321" />
+  <rect x="100" y="60" width="6" height="6" fill="#654321" />
+</svg>
