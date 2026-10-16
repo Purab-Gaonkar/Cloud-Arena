@@ -228,6 +228,16 @@ func set_portraits(id1: String, id2: String) -> void:
 			_portraits[i].texture = atlas
 
 
+## Practice mode: no clock, no round counter.
+func set_training() -> void:
+	_timer_label.text = "--"
+	_round_label.text = "TRAINING"
+
+
+func set_round_text(txt: String) -> void:
+	_round_label.text = txt
+
+
 func set_round(n: int) -> void:
 	_round_label.text = "ROUND %d" % n
 

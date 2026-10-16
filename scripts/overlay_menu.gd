@@ -12,6 +12,8 @@ var _panel: Control
 var _title: Label
 var _sub: Label
 var _hint: Label
+var _stats_box: VBoxContainer
+var _moves: Label
 
 
 func _ready() -> void:
@@ -44,6 +46,11 @@ func _ready() -> void:
 	_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(_sub)
 
+	_stats_box = VBoxContainer.new()
+	_stats_box.add_theme_constant_override("separation", 4)
+	_stats_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_child(_stats_box)
+
 	var line := ColorRect.new()
 	line.color = UiStyle.GOLD_DARK
 	line.custom_minimum_size = Vector2(0, 3)
@@ -52,6 +59,11 @@ func _ready() -> void:
 	_hint = UiStyle.label("", 22, UiStyle.TEXT, false, 6)
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(_hint)
+
+	_moves = UiStyle.label("MOVES:  tap ATTACK x3 = combo   |   HEAVY = slow, hard hit   |   double-tap a direction = dash (dash AWAY = invulnerable backdash)\nhold BLOCK facing your enemy = chip damage only   |   full meter + SUPER = unblockable finisher", 15, UiStyle.MUTED, false, 4)
+	_moves.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_moves.visible = false
+	box.add_child(_moves)
 
 
 func _pop() -> void:
@@ -64,7 +76,31 @@ func _pop() -> void:
 	tw.tween_property(_panel, "modulate:a", 1.0, 0.2)
 
 
-func show_match_end(text: String) -> void:
+func _stat_row(label: String, a: String, b: String, header: bool = false) -> void:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	var size := 26 if header else 22
+	var cols := [[a, UiStyle.P1, HORIZONTAL_ALIGNMENT_RIGHT], [label, UiStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER], [b, UiStyle.P2, HORIZONTAL_ALIGNMENT_LEFT]]
+	for c in cols:
+		var l := UiStyle.label(c[0], size, c[1], true, 5)
+		l.custom_minimum_size = Vector2(240 if c[2] == HORIZONTAL_ALIGNMENT_CENTER else 200, 0)
+		l.horizontal_alignment = c[2]
+		row.add_child(l)
+	_stats_box.add_child(row)
+
+
+func show_match_end(text: String, stats: Dictionary = {}) -> void:
+	for c in _stats_box.get_children():
+		c.queue_free()
+	_moves.visible = false
+	if not stats.is_empty():
+		_stat_row("", stats["names"][0], stats["names"][1], true)
+		_stat_row("ROUNDS", str(stats["rounds"][0]), str(stats["rounds"][1]))
+		_stat_row("DAMAGE", str(stats["damage"][0]), str(stats["damage"][1]))
+		_stat_row("BEST COMBO", str(stats["combo"][0]), str(stats["combo"][1]))
+		_stat_row("SUPERS", str(stats["supers"][0]), str(stats["supers"][1]))
+		var t := int(stats["time"])
+		_stat_row("MATCH TIME", "%d:%02d" % [t / 60, t % 60], "")
 	_mode = "match_end"
 	_title.text = "VICTORY"
 	_sub.text = text
@@ -78,6 +114,7 @@ func _set_paused(paused: bool) -> void:
 	_mode = "pause" if paused else "none"
 	_title.text = "PAUSED"
 	_sub.text = ""
+	_moves.visible = paused
 	_hint.text = "ESC / START  Resume      R / Y  Restart      C / X  Change fighters      M / B  Main menu"
 	if paused:
 		_pop()

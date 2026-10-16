@@ -36,6 +36,9 @@ var _shake: float = 0.0
 var _hud: Node = null
 var _world: Node2D = null
 var _intro_shown: bool = false
+var _training: bool = false
+var _stats: Dictionary = {"damage": [0, 0], "combo": [0, 0], "supers": [0, 0]}
+var _match_start_ms: int = 0
 var _cine_target: Node = null
 var _cine_layer: CanvasLayer = null
 var _cine_dim: ColorRect
@@ -49,6 +52,8 @@ var _overlay: Node = null
 func _ready() -> void:
 	if get_tree().root.has_meta("local_mode"):
 		local_mode = get_tree().root.get_meta("local_mode")
+	_training = local_mode and get_tree().root.has_meta("training") and get_tree().root.get_meta("training")
+	_match_start_ms = Time.get_ticks_msec()
 
 	RenderingServer.set_default_clear_color(Color(0.05, 0.05, 0.09))
 	_setup_background()
@@ -78,6 +83,21 @@ func _process(delta: float) -> void:
 func _physics_process(_delta: float) -> void:
 	if local_mode or multiplayer.is_server():
 		_separate_fighters()
+	if _training:
+		for p in _players:
+			if is_instance_valid(p):
+				p.meter = 100
+				if p.health < 45:
+					p.health = 100
+
+
+func stat_hit(attacker_index: int, damage: int, combo: int) -> void:
+	_stats["damage"][attacker_index] += damage
+	_stats["combo"][attacker_index] = maxi(_stats["combo"][attacker_index], combo)
+
+
+func stat_super(player_index: int) -> void:
+	_stats["supers"][player_index] += 1
 
 
 ## Fighters have no body-vs-body collision (so nobody can stand on a head);
@@ -323,6 +343,7 @@ func _spawn_local_players() -> void:
 		p.local_mode    = true
 		p.char_id       = picks[i]
 		p.is_cpu        = (i == 1 and vs_cpu)
+		p.is_dummy      = (i == 1 and _training)
 		p.position      = SPAWN_POINTS[i]
 		if i == 1 and picks[0] == picks[1]:
 			p.tint = Color(1.0, 0.6, 0.6)  # mirror match: tint P2 so they can be told apart
@@ -337,6 +358,9 @@ func _spawn_local_players() -> void:
 	var f1 := FighterData.get_fighter(picks[0])
 	var f2 := FighterData.get_fighter(picks[1])
 	_hud.set_portraits(picks[0], picks[1])
+	if _training:
+		f2 = f2.duplicate()
+		f2["name"] = "DUMMY"
 	_hud.set_fighters(f1["name"], f1["color"], ("CPU " if vs_cpu else "") + f2["name"], f2["color"])
 	print("[GameManager] Local players spawned: %s vs %s%s" % [picks[0], picks[1], " (CPU)" if vs_cpu else ""])
 
@@ -357,6 +381,12 @@ func _start_round() -> void:
 		p.facing_direction = 1 if i == 0 else -1
 		p.input_locked = true
 
+	if _training:
+		_hud.set_training()
+		for p in _players:
+			p.input_locked = false
+		return
+
 	await _sleep(0.6)
 	if _round == 1 and not _intro_shown:
 		_intro_shown = true
@@ -365,7 +395,10 @@ func _start_round() -> void:
 		_hud.show_announcement("%s  VS  %s" % [n1, n2], UiStyle.GOLD, 64)
 		await _sleep(1.6)
 	AudioManager.play("round_bell")
-	_hud.show_announcement("ROUND %d" % _round, Color.WHITE)
+	var final_round: bool = _wins[0] == ROUNDS_TO_WIN - 1 and _wins[1] == ROUNDS_TO_WIN - 1
+	if final_round:
+		_hud.set_round_text("FINAL ROUND")
+	_hud.show_announcement("FINAL ROUND" if final_round else "ROUND %d" % _round, Color(1.0, 0.45, 0.3) if final_round else Color.WHITE)
 	await _sleep(1.1)
 	_hud.show_announcement("FIGHT!", Color(1.0, 0.85, 0.1))
 	for p in _players:
@@ -422,7 +455,10 @@ func _finish_round(winner: int) -> void:
 		_wins[winner] += 1
 		_hud.set_wins(_wins[0], _wins[1])
 		var nm: String = _players[winner].get("char_id").to_upper()
-		_hud.show_announcement("%s WINS" % nm, Color(1.0, 0.85, 0.1))
+		if int(_players[winner].health) >= 100:
+			_hud.show_announcement("PERFECT!", Color(0.4, 1.0, 0.8))
+		else:
+			_hud.show_announcement("%s WINS" % nm, Color(1.0, 0.85, 0.1))
 	else:
 		_hud.show_announcement("DRAW", Color.WHITE)
 	await _sleep(2.0)
@@ -432,7 +468,11 @@ func _finish_round(winner: int) -> void:
 		_hud.show_announcement("PLAYER %d WINS THE MATCH!" % (winner + 1), Color(1.0, 0.85, 0.1))
 		AudioManager.stop_music(0.4)
 		AudioManager.play_jingle("jingle_win", 6.0)
-		_overlay.show_match_end("PLAYER %d WINS!" % (winner + 1))
+		var stats := _stats.duplicate(true)
+		stats["rounds"] = [_wins[0], _wins[1]]
+		stats["time"] = (Time.get_ticks_msec() - _match_start_ms) / 1000.0
+		stats["names"] = [FighterData.get_fighter(_players[0].char_id)["name"], FighterData.get_fighter(_players[1].char_id)["name"]]
+		_overlay.show_match_end("PLAYER %d WINS!" % (winner + 1), stats)
 		return
 	AudioManager.play_jingle("jingle_round", 1.5)
 	_round += 1

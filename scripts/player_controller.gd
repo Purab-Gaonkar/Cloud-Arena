@@ -6,7 +6,7 @@ extends CharacterBody2D
 const FighterData := preload("res://scripts/fighter_data.gd")
 const FxSprite    := preload("res://scripts/fx_sprite.gd")
 
-enum State { IDLE, MOVE, ATTACK, HIT, KO, BLOCK, HEAVY, SUPER }
+enum State { IDLE, MOVE, ATTACK, HIT, KO, BLOCK, HEAVY, SUPER, DASH }
 
 const MOVE_SPEED:    float = 320.0
 const JUMP_VELOCITY: float = -700.0
@@ -18,6 +18,10 @@ const FLOOR_Y:       float = 130.0
 const ARENA_HALF_W:  float = 1000.0
 const BLOCK_CHIP:    float = 0.15
 const METER_MAX:     int   = 100
+const DASH_SPEED:    float = 780.0
+const DASH_TIME:     float = 0.2
+const DASH_COOLDOWN: float = 0.3
+const BACKDASH_IFRAMES: float = 0.14   # backdashes dodge everything for this long
 const SUPER_RANGE:   float = 170.0
 
 ## Heavy attack: long wind-up, big knockback. Same keys as COMBO plus "lunge_from" (when the lunge starts).
@@ -38,6 +42,7 @@ const COMBO: Array[Dictionary] = [
 @export var is_cpu:       bool   = false
 @export var tint:         Color  = Color.WHITE
 @export var meter:        int    = 0
+@export var is_dummy:    bool   = false   # training dummy: stands still
 
 var current_state:    int = State.IDLE
 var facing_direction: int = 1
@@ -59,6 +64,13 @@ var _input_attack:   bool  = false
 var _input_block:    bool  = false
 var _input_heavy:    bool  = false
 var _input_special:  bool  = false
+var _input_dash:     int   = 0       # -1 / +1 for one frame after a double-tap
+var _tap_dir:        int   = 0
+var _tap_ms:         int   = 0
+var _dash_timer:     float = 0.0
+var _dash_cd:        float = 0.0
+var _dash_dir:       int   = 0
+var _dash_back:      bool  = false
 var _cur_move:       Dictionary = {}
 var _swing_fx_done:  bool  = false
 var _super:          Dictionary = {}
@@ -175,6 +187,7 @@ func _draw() -> void:
 
 
 func _sample_local_input() -> void:
+	_input_dash = 0
 	if input_locked:
 		_input_move_dir = 0.0
 		_input_jump     = false
@@ -197,6 +210,28 @@ func _sample_local_input() -> void:
 		_input_block    = Input.is_action_pressed("p2_block")
 		_input_heavy    = Input.is_action_just_pressed("p2_heavy")
 		_input_special  = Input.is_action_just_pressed("p2_special")
+	if player_index == 0:
+		_detect_dash("move_left", "move_right")
+	else:
+		_detect_dash("p2_left", "p2_right")
+
+
+## Double-tap left/right = dash. Dashing away from the opponent is an invulnerable backdash.
+func _detect_dash(left_a: String, right_a: String) -> void:
+	var dir := 0
+	if Input.is_action_just_pressed(left_a):
+		dir = -1
+	elif Input.is_action_just_pressed(right_a):
+		dir = 1
+	if dir == 0:
+		return
+	var now := Time.get_ticks_msec()
+	if dir == _tap_dir and now - _tap_ms < 260:
+		_input_dash = dir
+		_tap_dir = 0
+	else:
+		_tap_dir = dir
+		_tap_ms = now
 
 
 ## Very small CPU brain: closes distance, pokes in combos, blocks when the player swings.
@@ -207,6 +242,9 @@ func _sample_cpu_input(delta: float) -> void:
 	_input_block    = false
 	_input_heavy    = false
 	_input_special  = false
+	_input_dash     = 0
+	if is_dummy:
+		return
 	if input_locked or _opponent == null or _opponent.current_state == State.KO:
 		return
 
@@ -231,6 +269,9 @@ func _sample_cpu_input(delta: float) -> void:
 			_input_move_dir = -dir
 		"block":
 			_input_block = true
+		"dash_back":
+			_input_dash = -facing_direction
+			_ai_timer = 0.0
 		"jump":
 			_input_move_dir = dir
 			_input_jump = is_on_floor()
@@ -250,7 +291,10 @@ func _sample_cpu_input(delta: float) -> void:
 
 func _ai_decide(dist: float, range_px: float, opp_swinging: bool, lvl: int = 1) -> void:
 	var r := randf()
-	if opp_swinging and r < [0.25, 0.6, 0.9][lvl]:
+	if opp_swinging and lvl >= 1 and r > 0.8 and _dash_cd <= 0.0:
+		_ai_mode  = "dash_back"
+		_ai_timer = 0.3
+	elif opp_swinging and r < [0.25, 0.6, 0.9][lvl]:
 		_ai_mode  = "block"
 		_ai_timer = randf_range(0.35, 0.6)
 	elif dist <= range_px + 20.0:
@@ -294,6 +338,7 @@ func _server_process(delta: float) -> void:
 	if _hitstop > 0.0:
 		_hitstop -= delta
 		return
+	_dash_cd -= delta
 
 	if not is_on_floor():
 		velocity.y += GRAVITY * delta
@@ -303,6 +348,7 @@ func _server_process(delta: float) -> void:
 		State.MOVE:   _state_move(delta)
 		State.ATTACK, State.HEAVY: _state_attack(delta)
 		State.SUPER:  _state_super(delta)
+		State.DASH:   _state_dash(delta)
 		State.HIT:    _state_hit(delta)
 		State.BLOCK:  _state_block(delta)
 		State.KO:     _state_ko(delta)
@@ -326,6 +372,9 @@ func _ground_move(delta: float, target_x: float) -> void:
 
 
 func _try_start_actions() -> bool:
+	if _input_dash != 0 and is_on_floor() and _dash_cd <= 0.0:
+		_enter_dash(_input_dash)
+		return true
 	if _input_special and meter >= METER_MAX:
 		_enter_super()
 		return true
@@ -357,6 +406,26 @@ func _state_move(delta: float) -> void:
 	if _try_start_actions():
 		return
 	if _input_move_dir == 0.0:
+		current_state = State.IDLE
+
+
+func _enter_dash(dir: int) -> void:
+	current_state = State.DASH
+	_dash_dir     = dir
+	_dash_back    = dir != facing_direction
+	_dash_timer   = DASH_TIME
+	_input_dash   = 0
+	velocity.x    = dir * DASH_SPEED
+	AudioManager.play("swing_light", -6.0, 0.1)
+	_notify_scene("spawn_fx", ["dust", global_position + Vector2(-dir * 20.0, 52.0), -dir, Color(1, 1, 1, 0.8), 1.2])
+
+
+func _state_dash(delta: float) -> void:
+	_dash_timer -= delta
+	velocity.x = _dash_dir * DASH_SPEED * clampf(_dash_timer / DASH_TIME * 1.3, 0.3, 1.0)
+	if _dash_timer <= 0.0:
+		_dash_cd = DASH_COOLDOWN
+		velocity.x *= 0.2
 		current_state = State.IDLE
 
 
@@ -453,6 +522,7 @@ func _enter_heavy() -> void:
 # ── Super (finisher) ────────────────────────────────────────────────────────
 
 func _enter_super() -> void:
+	_notify_scene("stat_super", [player_index])
 	meter           = 0
 	_super          = _fighter["super"]
 	current_state   = State.SUPER
@@ -569,6 +639,8 @@ func _resolve_hits(step: Dictionary) -> void:
 func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop: float, heavy: bool, unblockable: bool = false) -> void:
 	if current_state == State.KO or current_state == State.SUPER:
 		return
+	if current_state == State.DASH and _dash_back and _dash_timer > DASH_TIME - BACKDASH_IFRAMES:
+		return  # dodged
 	var toward_attacker := signf(attacker.global_position.x - global_position.x)
 	if toward_attacker == 0.0:
 		toward_attacker = -float(attacker.facing_direction)
@@ -595,6 +667,7 @@ func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop
 	if attacker._combo_hits >= 2:
 		_notify_scene("show_combo", [attacker.player_index, attacker._combo_hits])
 	health -= damage
+	_notify_scene("stat_hit", [attacker.player_index, damage, attacker._combo_hits])
 	if attacker.current_state == State.SUPER:
 		AudioManager.play("hit_super_final" if heavy else "hit_super")
 	elif heavy:
@@ -665,6 +738,9 @@ func _update_visuals() -> void:
 		State.HEAVY:
 			if _sprite.animation != "heavy":
 				_sprite.play("heavy")
+		State.DASH:
+			if _sprite.animation != "run":
+				_sprite.play("run")
 		State.SUPER:
 			pass  # driven by _enter_super / begin_super_strike / _state_super
 		State.BLOCK:
@@ -730,6 +806,7 @@ func reset_for_new_round(spawn_pos: Vector2) -> void:
 	_hitstop        = 0.0
 	_combo_buffered = false
 	meter           = 0
+	_dash_cd        = 0.0
 	_ko_by_super    = false
 	_combo_hits     = 0
 	_ai_mode        = "idle"

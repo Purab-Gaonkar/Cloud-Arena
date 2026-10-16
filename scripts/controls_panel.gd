@@ -112,7 +112,7 @@ func _refresh() -> void:
 
 func _refresh_info() -> void:
 	var pads := Input.get_connected_joypads()
-	var txt := "Click a slot, then press the key or gamepad button/stick/trigger you want. ESC cancels.   "
+	var txt := "Click a slot, then press the key or gamepad input you want (ESC cancels). Dash = double-tap left/right; dashing away is an invulnerable backdash.   "
 	if pads.is_empty():
 		txt += "No gamepad detected - plug one in and it works automatically (Player 1 = first pad, Player 2 = second)."
 	else:

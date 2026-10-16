@@ -129,6 +129,7 @@ func _build_ui() -> void:
 	var items := [
 		["VS  CPU",   Color(0.95, 0.4, 0.15), _on_cpu_pressed],
 		["LOCAL  2P", Color(0.55, 0.3, 1.0),  _on_local_pressed],
+		["TRAINING",  Color(0.95, 0.75, 0.2), _on_training_pressed],
 		["ONLINE",    Color(0.15, 0.7, 0.55), _on_online_pressed],
 		["CONTROLS",  Color(0.25, 0.55, 0.95), _on_controls_pressed],
 		["OPTIONS",   Color(0.85, 0.7, 0.2),  _on_options_pressed],
@@ -136,8 +137,8 @@ func _build_ui() -> void:
 	]
 	for i in range(items.size()):
 		var btn := UiStyle.button(items[i][0], items[i][1])
-		btn.position = Vector2(86, 304 + i * 56)
-		btn.size = Vector2(380, 48)
+		btn.position = Vector2(86, 300 + i * 50)
+		btn.size = Vector2(380, 44)
 		btn.pressed.connect(items[i][2])
 		add_child(btn)
 		_buttons.append(btn)
@@ -269,13 +270,22 @@ func _build_controls_modal() -> void:
 
 # ── Actions ─────────────────────────────────────────────────────────────────
 
+func _on_training_pressed() -> void:
+	get_tree().root.set_meta("local_mode", true)
+	get_tree().root.set_meta("vs_cpu", true)
+	get_tree().root.set_meta("training", true)
+	Transition.go(SELECT_SCENE)
+
+
 func _on_local_pressed() -> void:
+	get_tree().root.set_meta("training", false)
 	get_tree().root.set_meta("local_mode", true)
 	get_tree().root.set_meta("vs_cpu", false)
 	Transition.go(SELECT_SCENE)
 
 
 func _on_cpu_pressed() -> void:
+	get_tree().root.set_meta("training", false)
 	get_tree().root.set_meta("local_mode", true)
 	get_tree().root.set_meta("vs_cpu", true)
 	Transition.go(SELECT_SCENE)

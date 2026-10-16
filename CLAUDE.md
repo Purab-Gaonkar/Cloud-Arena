@@ -309,3 +309,12 @@ chmod +x cloud-run/deploy_cloudrun.sh
 - Menu-level actions (`ui_pause`, `ov_*`, `stage_next/prev`) are fixed and registered by `InputConfig`; scenes should poll actions (`Input.is_action_just_pressed`) rather than key codes so pads and rebinding keep working.
 - **`GameSettings` autoload** (`scripts/game_settings.gd`): CPU difficulty (EASY/NORMAL/HARD, used by the AI in `player_controller.gd`), screen shake, fullscreen (F11). Audio volumes live in `AudioManager`; both save to `user://settings.cfg`.
 - **World depth**: `WorldBuilder` now has ~16 parallax layers (far ridges + haze, light rays, mid trees, hanging lanterns) and two blurred foreground planes in front of the fighters (CanvasGroup + soft-focus shader), plus a vignette. `update_parallax(cam_x, cam_y)` drives them; new sprite kinds live in `scripts/scenery.gd` (vine, hang_lantern, fern, rock, rays).
+
+
+---
+
+## 10. Dash, training, stats
+
+- **Dash**: double-tap left/right (`_detect_dash` in `player_controller.gd`, local mode only for now). Dashing away from the opponent is a backdash with `BACKDASH_IFRAMES` of invulnerability. `State.DASH=8`.
+- **Training mode** (Main menu > TRAINING): P2 is a dummy (`is_dummy`), meter stays full, health refills below 45, no clock/rounds. Driven by root meta `training`.
+- **Match stats**: `game_manager.stat_hit/stat_super` collect damage, best combo, supers; shown on the victory screen (`overlay_menu.show_match_end(text, stats)`). Rounds announce `PERFECT!` for flawless wins and `FINAL ROUND` for the decider. The pause screen lists the move set.
