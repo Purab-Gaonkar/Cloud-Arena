@@ -16,6 +16,7 @@ var _showcase: Array = []   # [{"sprite": AnimatedSprite2D, "timer": float}]
 var _buttons: Array[Button] = []
 var _modal_online: Control
 var _modal_controls: Control
+var _modal_options: Control
 var _status_label: Label
 var _ip_field: LineEdit
 var _btn_matchmake: Button
@@ -28,6 +29,7 @@ func _ready() -> void:
 		get_tree().root.set_meta("local_mode", false)
 		get_tree().change_scene_to_file("res://scenes/game.tscn")
 		return
+	AudioManager.play_music("menu")
 	_build_world()
 	_build_ui()
 	_play_intro()
@@ -47,7 +49,7 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if _modal_online and event.is_action_pressed("ui_cancel") and (_modal_online.visible or _modal_controls.visible):
+	if _modal_online and event.is_action_pressed("ui_cancel") and (_modal_online.visible or _modal_controls.visible or _modal_options.visible):
 		_close_modals()
 		get_viewport().set_input_as_handled()
 
@@ -128,23 +130,25 @@ func _build_ui() -> void:
 		["LOCAL  2P", Color(0.55, 0.3, 1.0),  _on_local_pressed],
 		["ONLINE",    Color(0.15, 0.7, 0.55), _on_online_pressed],
 		["CONTROLS",  Color(0.25, 0.55, 0.95), _on_controls_pressed],
+		["OPTIONS",   Color(0.85, 0.7, 0.2),  _on_options_pressed],
 		["QUIT",      Color(0.75, 0.2, 0.3),  _on_quit_pressed],
 	]
 	for i in range(items.size()):
 		var btn := UiStyle.button(items[i][0], items[i][1])
-		btn.position = Vector2(86, 318 + i * 62)
-		btn.size = Vector2(380, 52)
+		btn.position = Vector2(86, 304 + i * 56)
+		btn.size = Vector2(380, 48)
 		btn.pressed.connect(items[i][2])
 		add_child(btn)
 		_buttons.append(btn)
 
 	var ver := UiStyle.label("v0.2.0   |   Fighter sprites: Craftpix", 13, UiStyle.MUTED, false, 4)
-	ver.position = Vector2(86, 686)
+	ver.position = Vector2(86, 690)
 	ver.size = Vector2(500, 20)
 	add_child(ver)
 
 	_build_online_modal()
 	_build_controls_modal()
+	_build_options_modal()
 
 
 func _play_intro() -> void:
@@ -159,7 +163,7 @@ func _play_intro() -> void:
 		tw.tween_property(n, "position:x", end_x, 0.6).set_delay(0.12 * i).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tw.tween_property(n, "modulate:a", 1.0, 0.35).set_delay(0.12 * i)
 	await get_tree().create_timer(0.12 * targets.size() + 0.7).timeout
-	if not (_modal_online.visible or _modal_controls.visible):
+	if not (_modal_online.visible or _modal_controls.visible or _modal_options.visible):
 		_buttons[0].grab_focus()
 
 
@@ -198,6 +202,7 @@ func _make_modal(title: String, size_v: Vector2) -> Control:
 
 
 func _show_modal(m: Control) -> void:
+	AudioManager.play("ui_open")
 	m.visible = true
 	var panel: Control = m.get_node("Panel")
 	panel.scale = Vector2(0.9, 0.9)
@@ -208,8 +213,10 @@ func _show_modal(m: Control) -> void:
 
 
 func _close_modals() -> void:
+	AudioManager.play("ui_back")
 	_modal_online.visible = false
 	_modal_controls.visible = false
+	_modal_options.visible = false
 	for b in _buttons:
 		b.disabled = false
 	_buttons[0].grab_focus()
@@ -253,7 +260,7 @@ func _build_online_modal() -> void:
 
 
 func _build_controls_modal() -> void:
-	_modal_controls = _make_modal("CONTROLS", Vector2(760, 420))
+	_modal_controls = _make_modal("CONTROLS", Vector2(760, 530))
 	var panel: Control = _modal_controls.get_node("Panel")
 	var rows := [
 		["", "PLAYER 1", "PLAYER 2"],
@@ -261,6 +268,8 @@ func _build_controls_modal() -> void:
 		["Jump", "W  or  Space", "Up"],
 		["Attack  (tap x3 = combo)", "J  or  Left Click", "/  or  Numpad 0"],
 		["Block  (face your enemy)", "S  or  K", "Down  or  ."],
+		["Heavy attack", "U", ",  or  Numpad 1"],
+		["Super finisher  (meter full)", "I", "M  or  Numpad 2"],
 		["Pause", "Esc", "Esc"],
 	]
 	var xs := [30.0, 300.0, 530.0]
@@ -278,7 +287,7 @@ func _build_controls_modal() -> void:
 			l.position = Vector2(xs[c], 90 + r * 44)
 			panel.add_child(l)
 	var back := UiStyle.button("BACK", Color(0.6, 0.6, 0.75))
-	back.position = Vector2(30, 360)
+	back.position = Vector2(30, 465)
 	back.size = Vector2(240, 46)
 	back.pressed.connect(_close_modals)
 	panel.add_child(back)
@@ -310,6 +319,45 @@ func _on_controls_pressed() -> void:
 	for b in _buttons:
 		b.disabled = true
 	_show_modal(_modal_controls)
+
+
+func _on_options_pressed() -> void:
+	for b in _buttons:
+		b.disabled = true
+	_show_modal(_modal_options)
+
+
+func _build_options_modal() -> void:
+	_modal_options = _make_modal("OPTIONS", Vector2(620, 330))
+	var panel: Control = _modal_options.get_node("Panel")
+	var rows := [["MUSIC", AudioManager.music_volume, 0], ["SOUND FX", AudioManager.sfx_volume, 1]]
+	for r in rows:
+		var y: float = 100.0 + float(r[2]) * 70.0
+		var lbl := UiStyle.label(r[0], 24, UiStyle.TEXT, true, 5)
+		lbl.position = Vector2(30, y)
+		panel.add_child(lbl)
+		var slider := HSlider.new()
+		slider.min_value = 0.0
+		slider.max_value = 1.0
+		slider.step = 0.05
+		slider.value = r[1]
+		slider.position = Vector2(210, y + 4)
+		slider.size = Vector2(380, 30)
+		slider.add_theme_stylebox_override("slider", UiStyle.box(Color(0.03, 0.02, 0.07), UiStyle.GOLD_DARK, 2, 6))
+		slider.add_theme_stylebox_override("grabber_area", UiStyle.box(UiStyle.GOLD, UiStyle.GOLD, 2, 6))
+		slider.add_theme_stylebox_override("grabber_area_highlight", UiStyle.box(UiStyle.GOLD.lightened(0.2), UiStyle.GOLD, 2, 6))
+		if r[2] == 0:
+			slider.value_changed.connect(func(v: float) -> void: AudioManager.set_music_volume(v))
+		else:
+			slider.value_changed.connect(func(v: float) -> void:
+				AudioManager.set_sfx_volume(v)
+				AudioManager.play("hit_light"))
+		panel.add_child(slider)
+	var back := UiStyle.button("BACK", Color(0.6, 0.6, 0.75))
+	back.position = Vector2(30, 250)
+	back.size = Vector2(240, 46)
+	back.pressed.connect(_close_modals)
+	panel.add_child(back)
 
 
 func _on_quit_pressed() -> void:

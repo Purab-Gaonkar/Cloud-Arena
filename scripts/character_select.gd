@@ -27,6 +27,7 @@ func _ready() -> void:
 	var root := get_tree().root
 	_vs_cpu = root.has_meta("vs_cpu") and root.get_meta("vs_cpu")
 	_stage = root.get_meta("stage") if root.has_meta("stage") else randi() % WorldBuilder.stage_count()
+	AudioManager.play_music("menu")
 	_build_ui()
 	_set_stage(_stage)
 	_refresh()
@@ -41,6 +42,7 @@ func _process(delta: float) -> void:
 func _set_stage(index: int) -> void:
 	_stage = posmod(index, WorldBuilder.stage_count())
 	if _world:
+		AudioManager.play("ui_toggle")
 		_world.queue_free()
 	_world = WorldBuilder.new()
 	_world.position = Vector2(640, 690.0 - WorldBuilder.GROUND_Y)
@@ -208,12 +210,17 @@ func _unhandled_input(event: InputEvent) -> void:
 func _handle(who: int, left: String, right: String, confirm: String, cancel: String, event: InputEvent) -> void:
 	if event.is_action_pressed(left) and not _locked[who]:
 		_cursor[who] = wrapi(_cursor[who] - 1, 0, FighterData.ROSTER.size())
+		AudioManager.play("ui_move")
 	elif event.is_action_pressed(right) and not _locked[who]:
 		_cursor[who] = wrapi(_cursor[who] + 1, 0, FighterData.ROSTER.size())
+		AudioManager.play("ui_move")
 	elif event.is_action_pressed(confirm) and not _locked[who]:
 		_locked[who] = true
+		AudioManager.play("ui_select")
+		AudioManager.play("hit_heavy", -8.0)
 		_sprites[_cursor[who]].play("attack_3")
 	elif event.is_action_pressed(cancel):
+		AudioManager.play("ui_back")
 		if _locked[who]:
 			_locked[who] = false
 		elif _vs_cpu and who == 1:

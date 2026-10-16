@@ -4,8 +4,9 @@
 extends CharacterBody2D
 
 const FighterData := preload("res://scripts/fighter_data.gd")
+const FxSprite    := preload("res://scripts/fx_sprite.gd")
 
-enum State { IDLE, MOVE, ATTACK, HIT, KO, BLOCK }
+enum State { IDLE, MOVE, ATTACK, HIT, KO, BLOCK, HEAVY, SUPER }
 
 const MOVE_SPEED:    float = 320.0
 const JUMP_VELOCITY: float = -700.0
@@ -16,6 +17,12 @@ const BODY_SIZE:     Vector2 = Vector2(36, 120)
 const FLOOR_Y:       float = 130.0
 const ARENA_HALF_W:  float = 1000.0
 const BLOCK_CHIP:    float = 0.15
+const METER_MAX:     int   = 100
+const SUPER_RANGE:   float = 170.0
+
+## Heavy attack: long wind-up, big knockback. Same keys as COMBO plus "lunge_from" (when the lunge starts).
+const HEAVY_MOVE: Dictionary = {"dur": 0.74, "active": [0.5, 0.8], "dmg": 22, "kb": Vector2(640.0, -380.0), "stun": 0.6,
+	"lunge": 300.0, "lunge_from": 0.42, "hitstop": 0.16, "heavy": true}
 
 ## Three-hit combo. "active" is the fraction of the swing during which the hitbox is live.
 const COMBO: Array[Dictionary] = [
@@ -30,6 +37,7 @@ const COMBO: Array[Dictionary] = [
 @export var char_id:      String = ""
 @export var is_cpu:       bool   = false
 @export var tint:         Color  = Color.WHITE
+@export var meter:        int    = 0
 
 var current_state:    int = State.IDLE
 var facing_direction: int = 1
@@ -49,6 +57,20 @@ var _input_move_dir: float = 0.0
 var _input_jump:     bool  = false
 var _input_attack:   bool  = false
 var _input_block:    bool  = false
+var _input_heavy:    bool  = false
+var _input_special:  bool  = false
+var _cur_move:       Dictionary = {}
+var _swing_fx_done:  bool  = false
+var _super:          Dictionary = {}
+var _super_phase:    int   = 0
+var _super_t:        float = 0.0
+var _super_hit_idx:  int   = 0
+var _super_tp_idx:   int   = 0
+var _super_landed:   bool  = false
+var _super_end_started: bool = false
+var _ko_by_super:    bool  = false
+var _aura: Node = null
+var _air_time: float = 0.0
 var _combo_hits: int = 0
 var _opponent = null  # the other fighter (untyped so we can read its state)
 
@@ -123,13 +145,17 @@ func _physics_process(delta: float) -> void:
 			var jp := Input.is_action_just_pressed(jump_a)
 			var at := Input.is_action_just_pressed(atk_a)
 			var bl := Input.is_action_pressed(blk_a)
+			var hv := Input.is_action_just_pressed("p2_heavy" if is_p2 else "heavy")
+			var sp := Input.is_action_just_pressed("p2_special" if is_p2 else "special")
 			if multiplayer.is_server():
 				_input_move_dir = md
 				_input_jump     = jp
 				_input_attack   = at
 				_input_block    = bl
+				_input_heavy    = hv
+				_input_special  = sp
 			else:
-				send_input.rpc_id(1, md, jp, at, bl)
+				send_input.rpc_id(1, md, jp, at, bl, hv, sp)
 		if multiplayer.is_server():
 			_server_process(delta)
 
@@ -154,17 +180,23 @@ func _sample_local_input() -> void:
 		_input_jump     = false
 		_input_attack   = false
 		_input_block    = false
+		_input_heavy    = false
+		_input_special  = false
 		return
 	if player_index == 0:
 		_input_move_dir = Input.get_axis("move_left", "move_right")
 		_input_jump     = Input.is_action_just_pressed("jump")
 		_input_attack   = Input.is_action_just_pressed("attack")
 		_input_block    = Input.is_action_pressed("block")
+		_input_heavy    = Input.is_action_just_pressed("heavy")
+		_input_special  = Input.is_action_just_pressed("special")
 	else:
 		_input_move_dir = Input.get_axis("p2_left", "p2_right")
 		_input_jump     = Input.is_action_just_pressed("p2_jump")
 		_input_attack   = Input.is_action_just_pressed("p2_attack")
 		_input_block    = Input.is_action_pressed("p2_block")
+		_input_heavy    = Input.is_action_just_pressed("p2_heavy")
+		_input_special  = Input.is_action_just_pressed("p2_special")
 
 
 ## Very small CPU brain: closes distance, pokes in combos, blocks when the player swings.
@@ -173,6 +205,8 @@ func _sample_cpu_input(delta: float) -> void:
 	_input_jump     = false
 	_input_attack   = false
 	_input_block    = false
+	_input_heavy    = false
+	_input_special  = false
 	if input_locked or _opponent == null or _opponent.current_state == State.KO:
 		return
 
@@ -203,7 +237,13 @@ func _sample_cpu_input(delta: float) -> void:
 			if dist > range_px:
 				_input_move_dir = dir
 			elif _ai_atk_cd <= 0.0:
-				_input_attack = true
+				var roll := randf()
+				if meter >= METER_MAX and roll < 0.6:
+					_input_special = true
+				elif roll < 0.2:
+					_input_heavy = true
+				else:
+					_input_attack = true
 				_ai_atk_cd = randf_range(0.28, 0.5)
 
 
@@ -235,7 +275,7 @@ func _ai_decide(dist: float, range_px: float, opp_swinging: bool) -> void:
 
 
 @rpc("any_peer", "call_local", "reliable")
-func send_input(move_dir: float, jump: bool, attack: bool, block: bool = false) -> void:
+func send_input(move_dir: float, jump: bool, attack: bool, block: bool = false, heavy: bool = false, special: bool = false) -> void:
 	if not multiplayer.is_server():
 		return
 	var sender := multiplayer.get_remote_sender_id()
@@ -245,6 +285,8 @@ func send_input(move_dir: float, jump: bool, attack: bool, block: bool = false) 
 	_input_jump     = jump
 	_input_attack   = attack
 	_input_block    = block
+	_input_heavy    = heavy
+	_input_special  = special
 
 
 func _server_process(delta: float) -> void:
@@ -258,7 +300,8 @@ func _server_process(delta: float) -> void:
 	match current_state:
 		State.IDLE:   _state_idle(delta)
 		State.MOVE:   _state_move(delta)
-		State.ATTACK: _state_attack(delta)
+		State.ATTACK, State.HEAVY: _state_attack(delta)
+		State.SUPER:  _state_super(delta)
 		State.HIT:    _state_hit(delta)
 		State.BLOCK:  _state_block(delta)
 		State.KO:     _state_ko(delta)
@@ -282,6 +325,12 @@ func _ground_move(delta: float, target_x: float) -> void:
 
 
 func _try_start_actions() -> bool:
+	if _input_special and meter >= METER_MAX:
+		_enter_super()
+		return true
+	if _input_heavy:
+		_enter_heavy()
+		return true
 	if _input_attack:
 		_enter_attack(0)
 		return true
@@ -290,6 +339,7 @@ func _try_start_actions() -> bool:
 		return true
 	if _input_jump and is_on_floor():
 		velocity.y = _fighter["jump"]
+		AudioManager.play("jump", -8.0)
 	return false
 
 
@@ -316,24 +366,37 @@ func _state_block(delta: float) -> void:
 
 
 func _state_attack(delta: float) -> void:
-	var step: Dictionary = COMBO[_combo_step]
+	var step: Dictionary = _cur_move
+	var is_heavy: bool = current_state == State.HEAVY
 	_attack_timer -= delta
 	var progress := 1.0 - _attack_timer / _attack_dur
+	var act: Array = step["active"]
+	var lunge_from: float = step.get("lunge_from", 0.0)
 
-	# Lunge forward during the wind-up, then slide to a stop.
-	if progress < step["active"][0]:
+	# Heavy: plant and charge first, lunge just before the strike. Light: lunge during wind-up.
+	if progress < lunge_from:
+		velocity.x = move_toward(velocity.x, 0.0, 2000.0 * delta)
+	elif progress < act[0]:
 		velocity.x = facing_direction * float(step["lunge"])
 	else:
 		velocity.x = move_toward(velocity.x, 0.0, 1400.0 * delta)
 
-	if _input_attack and _combo_step < COMBO.size() - 1:
+	if not is_heavy and _input_attack and _combo_step < COMBO.size() - 1:
 		_combo_buffered = true
 
-	var act: Array = step["active"]
 	_set_hitbox_enabled(progress >= act[0] and progress <= act[1])
 	_resolve_hits(step)
 
-	if _combo_buffered and progress >= act[1]:
+	if not _swing_fx_done and progress >= act[0]:
+		_swing_fx_done = true
+		var big := is_heavy or _combo_step == COMBO.size() - 1
+		AudioManager.play("swing_heavy" if big else "swing_light", -4.0)
+		_notify_scene("spawn_fx", ["slash_heavy" if big else "slash_light", global_position + Vector2(facing_direction * 62.0, -14.0), facing_direction, Color.WHITE, 1.0])
+		if is_heavy:
+			_notify_scene("spawn_fx", ["shockwave", global_position + Vector2(facing_direction * 40.0, 50.0), facing_direction, Color(1, 0.85, 0.6), 0.9])
+			_notify_scene("shake", [8.0])
+
+	if not is_heavy and _combo_buffered and progress >= act[1]:
 		_enter_attack(_combo_step + 1)
 	elif _attack_timer <= 0.0:
 		_set_hitbox_enabled(false)
@@ -357,6 +420,8 @@ func _enter_attack(step_index: int) -> void:
 	_combo_step     = step_index
 	_combo_buffered = false
 	current_state   = State.ATTACK
+	_cur_move       = COMBO[step_index]
+	_swing_fx_done  = false
 	_attack_dur     = float(COMBO[step_index]["dur"]) * float(_fighter["atk_speed"])
 	_attack_timer   = _attack_dur
 	_input_attack   = false
@@ -367,6 +432,115 @@ func _enter_attack(step_index: int) -> void:
 	var frame_count := _sprite.sprite_frames.get_frame_count(anim)
 	_sprite.sprite_frames.set_animation_speed(anim, frame_count / _attack_dur)
 	_sprite.play(anim)
+
+
+func _enter_heavy() -> void:
+	_combo_buffered = false
+	current_state   = State.HEAVY
+	_cur_move       = HEAVY_MOVE
+	_swing_fx_done  = false
+	_attack_dur     = float(HEAVY_MOVE["dur"]) * (1.0 + (float(_fighter["atk_speed"]) - 1.0) * 0.5)
+	_attack_timer   = _attack_dur
+	_input_heavy    = false
+	_input_attack   = false
+	_already_hit.clear()
+	_set_hitbox_enabled(false)
+	_sprite.sprite_frames.set_animation_speed("heavy", _sprite.sprite_frames.get_frame_count("heavy") / _attack_dur)
+	_sprite.play("heavy")
+
+
+# ── Super (finisher) ────────────────────────────────────────────────────────
+
+func _enter_super() -> void:
+	meter           = 0
+	_super          = _fighter["super"]
+	current_state   = State.SUPER
+	_super_phase    = 0
+	_super_t        = 0.0
+	_super_hit_idx  = 0
+	_super_tp_idx   = 0
+	_super_landed   = false
+	_super_end_started = false
+	_input_special  = false
+	_input_attack   = false
+	velocity        = Vector2.ZERO
+	_set_hitbox_enabled(false)
+	_sprite.sprite_frames.set_animation_speed("super_windup", 6.0)
+	_sprite.play("super_windup")
+	var gm := get_tree().current_scene
+	if gm and gm.has_method("super_cinematic"):
+		gm.super_cinematic(self, _super["name"], _fighter["color"])
+	else:
+		begin_super_strike()
+
+
+## Called by the game manager when the freeze-frame cinematic ends (or immediately without one).
+func begin_super_strike() -> void:
+	if current_state != State.SUPER:
+		return
+	_super_phase = 1
+	_super_t = 0.0
+	var strike_len: float = float(_super["dur"]) * 0.75
+	_sprite.sprite_frames.set_animation_speed("super_strike", _sprite.sprite_frames.get_frame_count("super_strike") / strike_len)
+	_sprite.play("super_strike")
+	_notify_scene("spawn_fx", ["super_flash", global_position + Vector2(0.0, -10.0), facing_direction, Color.WHITE, 1.3])
+	_notify_scene("shake", [10.0])
+
+
+func _state_super(delta: float) -> void:
+	if _super_phase == 0:
+		velocity = Vector2.ZERO
+		return
+	_super_t += delta
+	var dur: float = _super["dur"]
+
+	var vx := 0.0
+	for seg in _super["speed"]:
+		if _super_t >= seg[0] and _super_t < seg[1]:
+			vx = facing_direction * float(seg[2])
+	velocity.x = vx if vx != 0.0 else move_toward(velocity.x, 0.0, 2500.0 * delta)
+
+	var tps: Array = _super["tp"]
+	while _super_tp_idx < tps.size() and _super_t >= tps[_super_tp_idx][0]:
+		_super_teleport(int(tps[_super_tp_idx][1]))
+		_super_tp_idx += 1
+
+	var hits: Array = _super["hits"]
+	while _super_hit_idx < hits.size() and _super_t >= hits[_super_hit_idx][0]:
+		_super_hit(hits[_super_hit_idx])
+		_super_hit_idx += 1
+
+	if not _super_end_started and _super_t >= dur * 0.75:
+		_super_end_started = true
+		_sprite.sprite_frames.set_animation_speed("super_end", _sprite.sprite_frames.get_frame_count("super_end") / (dur * 0.25))
+		_sprite.play("super_end")
+	if _super_t >= dur:
+		current_state = State.IDLE
+
+
+func _super_teleport(side: int) -> void:
+	if _opponent == null:
+		return
+	_notify_scene("spawn_fx", ["dust", global_position + Vector2(0.0, 40.0), 1, Color(0.7, 0.5, 1.0), 2.0])
+	position = Vector2(clampf(_opponent.position.x + side * 72.0, -ARENA_HALF_W, ARENA_HALF_W), _opponent.position.y)
+	facing_direction = -side
+	velocity = Vector2.ZERO
+	_notify_scene("spawn_fx", ["dust", global_position + Vector2(0.0, 40.0), 1, Color(0.7, 0.5, 1.0), 2.0])
+
+
+func _super_hit(entry: Array) -> void:
+	if _opponent == null:
+		return
+	var final: bool = entry[2]
+	var dx: float = _opponent.global_position.x - global_position.x
+	var dy: float = _opponent.global_position.y - global_position.y
+	var in_front: bool = dx * facing_direction > -30.0
+	var in_range: bool = absf(dx) < SUPER_RANGE + float(_fighter["reach"]) * 0.4 and absf(dy) < 150.0 and in_front
+	if not in_range:
+		return
+	_super_landed = true
+	var kb := Vector2(760.0, -460.0) if final else Vector2(40.0, -30.0)
+	_opponent.receive_hit(self, int(entry[1]), kb, 0.75 if final else 0.45, 0.18 if final else 0.05, final, true)
 
 
 func _set_hitbox_enabled(enabled: bool) -> void:
@@ -387,12 +561,12 @@ func _resolve_hits(step: Dictionary) -> void:
 			continue
 		_already_hit.append(target)
 		var dmg := int(round(float(step["dmg"]) * float(_fighter["damage"])))
-		target.receive_hit(self, dmg, step["kb"], float(step["stun"]), float(step["hitstop"]), _combo_step == COMBO.size() - 1)
+		target.receive_hit(self, dmg, step["kb"], float(step["stun"]), float(step["hitstop"]), current_state == State.HEAVY or _combo_step == COMBO.size() - 1)
 
 
 ## Called on the defender by the attacker's hitbox.
-func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop: float, heavy: bool) -> void:
-	if current_state == State.KO:
+func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop: float, heavy: bool, unblockable: bool = false) -> void:
+	if current_state == State.KO or current_state == State.SUPER:
 		return
 	var toward_attacker := signf(attacker.global_position.x - global_position.x)
 	if toward_attacker == 0.0:
@@ -400,7 +574,7 @@ func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop
 	var push_dir := -toward_attacker
 	var contact := global_position + Vector2(toward_attacker * 24.0, -10.0)
 
-	var blocked := current_state == State.BLOCK and int(toward_attacker) == facing_direction
+	var blocked := current_state == State.BLOCK and int(toward_attacker) == facing_direction and not unblockable
 	if blocked:
 		var chip := maxi(1, int(round(damage * BLOCK_CHIP)))
 		health = maxi(1, health - chip)
@@ -409,6 +583,9 @@ func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop
 		attacker._hitstop = hitstop * 0.6
 		attacker.velocity.x = -push_dir * 120.0
 		_sprite.play("block")
+		attacker.add_meter(2)
+		add_meter(4)
+		AudioManager.play("block")
 		_notify_scene("hit_effect", [contact, 0, facing_direction])
 		return
 
@@ -417,6 +594,15 @@ func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop
 	if attacker._combo_hits >= 2:
 		_notify_scene("show_combo", [attacker.player_index, attacker._combo_hits])
 	health -= damage
+	if attacker.current_state == State.SUPER:
+		AudioManager.play("hit_super_final" if heavy else "hit_super")
+	elif heavy:
+		AudioManager.play("hit_heavy")
+	else:
+		AudioManager.play("hit_light")
+	if attacker.current_state != State.SUPER:
+		attacker.add_meter(int(round(damage * 1.6)))
+	add_meter(int(round(damage * 0.8)))
 	_hitstop = hitstop
 	attacker._hitstop = hitstop
 	_set_hitbox_enabled(false)
@@ -425,9 +611,12 @@ func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop
 	_notify_scene("hit_effect", [contact, 2 if heavy else 1, facing_direction])
 	if heavy:
 		_notify_scene("shake", [14.0])
+	if attacker.current_state == State.SUPER:
+		_notify_scene("spawn_fx", ["slash_heavy" if heavy else "slash_light", contact + Vector2(0.0, -10.0), int(-toward_attacker), Color(1.0, 0.9, 0.7), 1.2])
 
 	if health <= 0:
 		health = 0
+		_ko_by_super = attacker.current_state == State.SUPER
 		_on_ko()
 	else:
 		current_state = State.HIT
@@ -441,7 +630,14 @@ func _on_ko() -> void:
 		velocity.y = -250.0
 	_notify_scene("shake", [20.0])
 	print("[Player %d] KO!" % player_index)
-	_notify_scene("on_player_ko", [player_index])
+	_notify_scene("on_player_ko", [player_index, _ko_by_super])
+
+
+func add_meter(amount: int) -> void:
+	var before := meter
+	meter = clampi(meter + amount, 0, METER_MAX)
+	if before < METER_MAX and meter >= METER_MAX:
+		AudioManager.play("super_ready")
 
 
 func _notify_scene(method: String, args: Array) -> void:
@@ -465,6 +661,11 @@ func _update_visuals() -> void:
 		State.ATTACK:
 			if not _sprite.animation.begins_with("attack"):
 				_sprite.play("attack_%d" % (_combo_step + 1))
+		State.HEAVY:
+			if _sprite.animation != "heavy":
+				_sprite.play("heavy")
+		State.SUPER:
+			pass  # driven by _enter_super / begin_super_strike / _state_super
 		State.BLOCK:
 			if _sprite.animation != "block":
 				_sprite.play("block")
@@ -484,6 +685,29 @@ func _update_visuals() -> void:
 	var hud = get_tree().root.get_node_or_null("Game/TekkenHUD")
 	if hud and hud.has_method("update_health"):
 		hud.update_health(player_index, health)
+		hud.update_meter(player_index, meter)
+	_update_aura()
+
+	# Landing thud after a real fall.
+	if airborne:
+		_air_time += get_physics_process_delta_time()
+	else:
+		if _air_time > 0.3 and current_state != State.KO:
+			AudioManager.play("land", -10.0)
+		_air_time = 0.0
+
+
+## A flickering aura while the super meter is full.
+func _update_aura() -> void:
+	var ready_for_super := meter >= METER_MAX and current_state != State.KO
+	if ready_for_super and _aura == null:
+		_aura = FxSprite.spawn(self, "aura_flame", Vector2(0.0, -6.0), 1, _fighter["color"], 1.9)
+		if _aura:
+			_aura.show_behind_parent = true
+			_aura.z_index = 0
+	elif not ready_for_super and _aura != null:
+		_aura.queue_free()
+		_aura = null
 
 
 ## Scrub the jump sheet by vertical speed: take-off -> apex -> fall.
@@ -504,6 +728,9 @@ func reset_for_new_round(spawn_pos: Vector2) -> void:
 	_hit_timer      = 0.0
 	_hitstop        = 0.0
 	_combo_buffered = false
+	meter           = 0
+	_ko_by_super    = false
+	_combo_hits     = 0
 	_ai_mode        = "idle"
 	_ai_timer       = 0.0
 	velocity        = Vector2.ZERO

@@ -15,6 +15,8 @@ const TIPS: Array[String] = [
 	"SAMURAI REACHES FARTHEST, SHINOBI HITS FASTEST",
 	"THE THIRD HIT OF A COMBO LAUNCHES YOUR OPPONENT",
 	"WIN TWO ROUNDS TO TAKE THE MATCH",
+	"FILL THE SUPER METER, THEN PRESS I (P1) OR M (P2) FOR YOUR FINISHER",
+	"HEAVY ATTACKS (U / COMMA) CHARGE SLOWLY BUT HIT HARD",
 ]
 
 var _paths: PackedStringArray = []
@@ -33,6 +35,7 @@ func _ready() -> void:
 	if DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server"):
 		get_tree().change_scene_to_file(NEXT_SCENE)
 		return
+	AudioManager.play_music("menu", 1.5)
 	_build_ui()
 	_queue_loads()
 
@@ -40,7 +43,10 @@ func _ready() -> void:
 func _queue_loads() -> void:
 	for f in FighterData.ROSTER:
 		for spec in FighterData.ANIMS:
-			_paths.append("%s%s/%s.png" % [FighterData.BASE_DIR, f["id"], spec[1]])
+			var dir: String = FighterData.GEN_DIR if spec.size() > 4 else FighterData.BASE_DIR
+			_paths.append("%s%s/%s.png" % [dir, f["id"], spec[1]])
+	for fx_name in FighterData.FX:
+		_paths.append("%sfx/%s.png" % [FighterData.GEN_DIR, fx_name])
 	for p in _paths:
 		ResourceLoader.load_threaded_request(p)
 

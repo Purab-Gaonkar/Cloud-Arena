@@ -288,3 +288,14 @@ chmod +x cloud-run/deploy_cloudrun.sh
 - Fighter separation and hit resolution run only where `_server_process` runs (local or server), so they stay server-authoritative.
 - When online play is built, the chosen `char_id` and `stage` must be carried in the room metadata and replicated (currently network players default to a roster entry by `player_index`, and the stage is random).
 - `player_controller.send_input` now takes a 4th `block` argument.
+
+
+---
+
+## 8. Heavy attacks, finishers, generated art and audio
+
+- **Controls**: heavy = `U` (P1) / `,` or Numpad 1 (P2); super finisher = `I` (P1) / `M` or Numpad 2 (P2). Super needs a full meter (fills from dealing/taking damage; resets each round).
+- **States** `HEAVY=6`, `SUPER=7` were appended to the `State` enum in `scripts/player_controller.gd` (keep existing values stable for networking). `meter` is an exported property; add it to the MultiplayerSynchronizer config when online play is built.
+- **Super moves** are data in `FighterData.ROSTER[...]["super"]` (dash segments, teleports, timed hits). `game_manager.super_cinematic()` runs the freeze-frame intro, then calls `begin_super_strike()` on the fighter.
+- **Generated art**: `python tools/gen_sprites.py` (needs `pip install pillow numpy`) rebuilds `assets/generated/` - derived Heavy/Super strips per fighter plus FX sheets (slashes, impact, shockwave, aura, speed lines...). Hand-drawn replacements can use the same file names/frame sizes (`FighterData.FX`). Spawn FX with `FxSprite.spawn()` (`scripts/fx_sprite.gd`).
+- **Audio**: `AudioManager` autoload (`scripts/audio_manager.gd`) - music crossfades, pooled SFX, Music/SFX buses, volume sliders saved to `user://settings.cfg`. Logical names map to files in `assets/audio/` (all CC0, see `assets/audio/CREDITS.md`). Missing files are skipped silently.

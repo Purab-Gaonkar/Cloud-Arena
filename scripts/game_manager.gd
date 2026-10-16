@@ -5,6 +5,8 @@ extends Node2D
 
 const FighterData := preload("res://scripts/fighter_data.gd")
 const WorldBuilder := preload("res://scripts/world_builder.gd")
+const FxSprite     := preload("res://scripts/fx_sprite.gd")
+const UiStyle      := preload("res://scripts/ui_style.gd")
 
 const ROUNDS_TO_WIN: int = 2
 const SPAWN_POINTS: Array[Vector2] = [
@@ -33,6 +35,13 @@ var _shake: float = 0.0
 
 var _hud: Node = null
 var _world: Node2D = null
+var _cine_target: Node = null
+var _cine_layer: CanvasLayer = null
+var _cine_dim: ColorRect
+var _cine_band: ColorRect
+var _cine_name: Label
+var _cine_who: Label
+var _cine_fx: Node = null
 var _overlay: Node = null
 
 
@@ -46,6 +55,7 @@ func _ready() -> void:
 	_setup_hud()
 
 	if local_mode:
+		_build_cinematic()
 		_overlay = preload("res://scripts/overlay_menu.gd").new()
 		_overlay.name = "OverlayMenu"
 		add_child(_overlay)
@@ -57,6 +67,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
+	AudioManager.set_slowmo(1.0)
 
 
 func _process(delta: float) -> void:
@@ -103,29 +114,127 @@ func _separate_fighters() -> void:
 func _update_camera(delta: float) -> void:
 	if _players.size() < 2 or not is_instance_valid(_players[0]) or not is_instance_valid(_players[1]):
 		return
+	# Real-time delta so the camera keeps moving during slow-motion / super freeze frames.
+	var rd := delta / maxf(Engine.time_scale, 0.02)
 	var a: Vector2 = _players[0].global_position
 	var b: Vector2 = _players[1].global_position
 	var vp := get_viewport_rect().size
 	var dist := absf(a.x - b.x)
 
 	var target_zoom := clampf(vp.x / (dist + 700.0), 0.75, 1.15)
-	var z := lerpf(_camera.zoom.x, target_zoom, clampf(4.0 * delta, 0.0, 1.0))
+	if is_instance_valid(_cine_target):
+		target_zoom = 1.5
+	var z := lerpf(_camera.zoom.x, target_zoom, clampf(5.0 * rd, 0.0, 1.0))
 	_camera.zoom = Vector2(z, z)
 
 	var half_w := vp.x / (2.0 * z)
 	var limit := maxf(0.0, FLOOR_HALF_W - half_w)
 	var tx := clampf((a.x + b.x) * 0.5, -limit, limit)
 	var ty := CAMERA_FLOOR_Y - vp.y / z * 0.27
-	_camera.position = _camera.position.lerp(Vector2(tx, ty), clampf(6.0 * delta, 0.0, 1.0))
+	if is_instance_valid(_cine_target):
+		tx = clampf(_cine_target.global_position.x, -limit, limit)
+		ty = _cine_target.global_position.y - 10.0
+	_camera.position = _camera.position.lerp(Vector2(tx, ty), clampf(6.0 * rd, 0.0, 1.0))
 	if _world:
 		_world.update_parallax(_camera.position.x)
 
-	_shake = move_toward(_shake, 0.0, 60.0 * delta)
+	_shake = move_toward(_shake, 0.0, 60.0 * rd)
 	_camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
 
 
 func shake(amount: float) -> void:
 	_shake = maxf(_shake, amount)
+
+
+func spawn_fx(fx_name: String, pos: Vector2, facing: int = 1, tint: Color = Color.WHITE, fx_scale: float = 1.0) -> void:
+	FxSprite.spawn(self, fx_name, pos, facing, tint, fx_scale)
+
+
+# ── Super (finisher) cinematic ──────────────────────────────────────────────
+
+func _build_cinematic() -> void:
+	_cine_layer = CanvasLayer.new()
+	_cine_layer.layer = 12
+	_cine_layer.visible = false
+	add_child(_cine_layer)
+
+	_cine_dim = ColorRect.new()
+	_cine_dim.color = Color(0.0, 0.0, 0.05, 0.0)
+	_cine_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_cine_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_cine_layer.add_child(_cine_dim)
+
+	_cine_band = ColorRect.new()
+	_cine_band.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+	_cine_band.anchor_right = 1.0
+	_cine_band.offset_top = -255
+	_cine_band.offset_bottom = -105
+	_cine_band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_cine_layer.add_child(_cine_band)
+
+	_cine_who = UiStyle.label("", 30, Color.WHITE, true, 8)
+	_cine_who.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+	_cine_who.anchor_right = 1.0
+	_cine_who.offset_top = -249
+	_cine_who.offset_bottom = -213
+	_cine_who.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_cine_layer.add_child(_cine_who)
+
+	_cine_name = UiStyle.label("", 100, Color.WHITE, true, 16)
+	_cine_name.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+	_cine_name.anchor_right = 1.0
+	_cine_name.offset_top = -217
+	_cine_name.offset_bottom = -93
+	_cine_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_cine_name.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	_cine_name.add_theme_constant_override("shadow_offset_x", 6)
+	_cine_name.add_theme_constant_override("shadow_offset_y", 6)
+	_cine_layer.add_child(_cine_name)
+
+
+## Freeze-frame super intro: world dims, camera punches in on the attacker, banner slams in,
+## then the fighter's strike script starts (begin_super_strike).
+func super_cinematic(fighter: Node, move_name: String, color: Color) -> void:
+	if _cine_layer == null:
+		fighter.begin_super_strike()
+		return
+	_cine_target = fighter
+	Engine.time_scale = 0.03
+	AudioManager.play("super_start")
+	AudioManager.duck(-12.0, 1.4)
+	AudioManager.set_slowmo(0.5)
+	var vp := get_viewport_rect().size
+	_cine_layer.visible = true
+	_cine_band.color = Color(color.r * 0.5, color.g * 0.5, color.b * 0.5, 0.9)
+	_cine_who.text = fighter.char_id.to_upper() + "  -  SUPER ART"
+	_cine_who.add_theme_color_override("font_color", color.lightened(0.4))
+	_cine_name.text = move_name
+	_cine_fx = FxSprite.spawn(_cine_layer, "speed_lines", Vector2(vp.x * 0.5, vp.y * 0.5), 1, Color(1, 1, 1, 0.5), 6.0)
+
+	_cine_dim.color.a = 0.0
+	_cine_band.modulate.a = 0.0
+	_cine_name.modulate.a = 0.0
+	_cine_name.pivot_offset = Vector2(vp.x * 0.5, 62)
+	_cine_name.scale = Vector2(2.2, 2.2)
+	_cine_name.position.x = 300.0
+	var tw := create_tween().set_parallel(true).set_ignore_time_scale(true)
+	tw.tween_property(_cine_dim, "color:a", 0.6, 0.15)
+	tw.tween_property(_cine_band, "modulate:a", 1.0, 0.12)
+	tw.tween_property(_cine_name, "modulate:a", 1.0, 0.1)
+	tw.tween_property(_cine_name, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_cine_name, "position:x", 0.0, 0.25).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	shake(12.0)
+
+	await _sleep(1.0)
+
+	_cine_layer.visible = false
+	if is_instance_valid(_cine_fx):
+		_cine_fx.queue_free()
+	Engine.time_scale = 1.0
+	AudioManager.set_slowmo(1.0)
+	_cine_target = null
+	if is_instance_valid(fighter):
+		fighter.begin_super_strike()
 
 
 func show_combo(player_index: int, hits: int) -> void:
@@ -157,6 +266,12 @@ func hit_effect(pos: Vector2, kind: int, dir: int) -> void:
 	add_child(p)
 	p.emitting = true
 	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+	match kind:
+		0: FxSprite.spawn(self, "block_spark", pos, dir, Color.WHITE, 1.0)
+		1: FxSprite.spawn(self, "impact_burst", pos, dir, Color.WHITE, 0.8)
+		_:
+			FxSprite.spawn(self, "impact_burst", pos, dir, Color(1.0, 0.8, 0.6), 1.3)
+			FxSprite.spawn(self, "dust", pos + Vector2(0.0, 50.0), dir, Color.WHITE, 1.6)
 
 
 # ── Scene dressing ──────────────────────────────────────────────────────────
@@ -167,6 +282,7 @@ func _setup_background() -> void:
 	_world = WorldBuilder.new()
 	add_child(_world)
 	_world.build(stage, get_viewport_rect().size)
+	AudioManager.play_music("battle_%d" % posmod(stage, 3))
 
 
 func _setup_platform() -> void:
@@ -240,6 +356,7 @@ func _start_round() -> void:
 		p.input_locked = true
 
 	await _sleep(0.6)
+	AudioManager.play("round_bell")
 	_hud.show_announcement("ROUND %d" % _round, Color.WHITE)
 	await _sleep(1.1)
 	_hud.show_announcement("FIGHT!", Color(1.0, 0.85, 0.1))
@@ -263,7 +380,7 @@ func _on_time_up() -> void:
 
 
 ## Called by a fighter the moment its health hits zero.
-func on_player_ko(loser_index: int) -> void:
+func on_player_ko(loser_index: int, by_super: bool = false) -> void:
 	if not local_mode:
 		end_round(loser_index)
 		return
@@ -271,11 +388,17 @@ func on_player_ko(loser_index: int) -> void:
 		return
 	_round_over = true
 	_hud.stop_round()
-	_hud.show_announcement("K.O.!", Color(1.0, 0.2, 0.2))
+	_hud.show_announcement("SUPER K.O.!" if by_super else "K.O.!", Color(1.0, 0.85, 0.2) if by_super else Color(1.0, 0.2, 0.2))
 	_lock_players()
-	Engine.time_scale = 0.3
+	if by_super and is_instance_valid(_players[loser_index]):
+		FxSprite.spawn(self, "ko_flash", _players[loser_index].global_position + Vector2(0.0, -20.0), 1, Color.WHITE, 3.2)
+		shake(34.0)
+	AudioManager.play("ko")
+	AudioManager.set_slowmo(0.5)
+	Engine.time_scale = 0.2 if by_super else 0.3
 	await _sleep(0.7)
 	Engine.time_scale = 1.0
+	AudioManager.set_slowmo(1.0)
 	await _sleep(1.3)
 	_finish_round(1 - loser_index)
 
@@ -299,8 +422,11 @@ func _finish_round(winner: int) -> void:
 	if winner >= 0 and _wins[winner] >= ROUNDS_TO_WIN:
 		_match_over = true
 		_hud.show_announcement("PLAYER %d WINS THE MATCH!" % (winner + 1), Color(1.0, 0.85, 0.1))
+		AudioManager.stop_music(0.4)
+		AudioManager.play_jingle("jingle_win", 6.0)
 		_overlay.show_match_end("PLAYER %d WINS!" % (winner + 1))
 		return
+	AudioManager.play_jingle("jingle_round", 1.5)
 	_round += 1
 	_start_round()
 

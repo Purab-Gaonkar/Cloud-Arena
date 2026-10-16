@@ -73,6 +73,7 @@ func show_match_end(text: String) -> void:
 
 
 func _set_paused(paused: bool) -> void:
+	AudioManager.play("ui_open" if paused else "ui_back")
 	get_tree().paused = paused
 	_mode = "pause" if paused else "none"
 	_title.text = "PAUSED"

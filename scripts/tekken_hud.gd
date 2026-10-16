@@ -13,6 +13,7 @@ const PIPS_TO_WIN:   int   = 2
 const SIDE_W:        float = 560.0
 
 var _bars:      Array = [null, null]
+var _meters:    Array = [null, null]
 var _names:     Array = [null, null]
 var _portraits: Array = [null, null]
 var _pips:      Array = [[], []]
@@ -133,6 +134,18 @@ func _build_side(i: int) -> void:
 	root.add_child(bar)
 	_bars[i] = bar
 
+	var meter_w := bar_w - 72.0
+	var meter := HudBar.new()
+	meter.mirrored = right
+	meter.meter_mode = true
+	meter.skew = 10.0
+	meter.accent = UiStyle.GOLD_DARK
+	meter.meter_color = accent
+	meter.position = Vector2(bar_x + (0.0 if right else 72.0), 72)
+	meter.size = Vector2(meter_w, 18)
+	root.add_child(meter)
+	_meters[i] = meter
+
 	for k in range(PIPS_TO_WIN):
 		var pip := Panel.new()
 		pip.size = Vector2(16, 16)
@@ -190,6 +203,11 @@ func _style_pip(pip: Panel, filled: bool, accent: Color) -> void:
 func update_health(player_index: int, current_hp: int) -> void:
 	if _bars[player_index]:
 		_bars[player_index].set_value(float(current_hp))
+
+
+func update_meter(player_index: int, meter: int) -> void:
+	if _meters[player_index]:
+		_meters[player_index].set_value(float(meter))
 
 
 func set_fighters(p1_name: String, p1_color: Color, p2_name: String, p2_color: Color) -> void:
@@ -254,6 +272,8 @@ func reset_round() -> void:
 	_last_sec = 99
 	for b in _bars:
 		b.reset()
+	for m in _meters:
+		m.reset()
 	_timer_label.text = str(int(ROUND_SECONDS))
 	_timer_label.add_theme_color_override("font_color", UiStyle.GOLD)
 	clear_announcement()

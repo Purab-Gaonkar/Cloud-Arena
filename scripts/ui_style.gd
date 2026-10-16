@@ -83,6 +83,9 @@ static func button(text: String, accent: Color, height: float = 54.0) -> Button:
 	var grow := func(on: bool) -> void:
 		var tw := btn.create_tween()
 		tw.tween_property(btn, "scale", Vector2(1.05, 1.05) if on else Vector2.ONE, 0.12)
+	btn.mouse_entered.connect(func() -> void: AudioManager.play("ui_move", -6.0, 0.02))
+	btn.focus_entered.connect(func() -> void: AudioManager.play("ui_move", -6.0, 0.02))
+	btn.pressed.connect(func() -> void: AudioManager.play("ui_confirm"))
 	btn.mouse_entered.connect(grow.bind(true))
 	btn.focus_entered.connect(grow.bind(true))
 	btn.mouse_exited.connect(grow.bind(false))
