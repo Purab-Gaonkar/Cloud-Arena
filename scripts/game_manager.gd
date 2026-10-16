@@ -1,47 +1,169 @@
 ## game_manager.gd -- Match and spawn manager.
-## LOCAL MODE: Both players spawned immediately, no networking.
+## LOCAL MODE: Both players spawned immediately (P2 may be a CPU), best-of-3 round flow.
 ## NETWORK MODE: Listens for peer connections.
 extends Node2D
 
-var local_mode: bool = true
+const FighterData := preload("res://scripts/fighter_data.gd")
 
+const ROUNDS_TO_WIN: int = 2
 const SPAWN_POINTS: Array[Vector2] = [
-	Vector2(-600.0, 0.0),
-	Vector2( 600.0, 0.0),
+	Vector2(-300.0, 70.0),
+	Vector2( 300.0, 70.0),
 ]
+const FLOOR_HALF_W: float = 1500.0
+const CAMERA_FLOOR_Y: float = 130.0
+
+var local_mode: bool = true
 
 var _players: Array = []
 var _next_spawn_index: int = 0
 var _network_players: Dictionary = {}
 
+var _wins: Array[int] = [0, 0]
+var _round: int = 1
+var _round_over: bool = false
+var _match_over: bool = false
+var _shake: float = 0.0
+
 @onready var _players_node: Node2D        = $Players
 @onready var _spawner: MultiplayerSpawner = $MultiplayerSpawner
+@onready var _camera: Camera2D            = $Camera2D
+
+var _hud: Node = null
+var _overlay: Node = null
 
 
 func _ready() -> void:
 	if get_tree().root.has_meta("local_mode"):
 		local_mode = get_tree().root.get_meta("local_mode")
 
+	RenderingServer.set_default_clear_color(Color(0.05, 0.05, 0.09))
 	_setup_background()
 	_setup_platform()
 	_setup_hud()
 
 	if local_mode:
+		_overlay = preload("res://scripts/overlay_menu.gd").new()
+		_overlay.name = "OverlayMenu"
+		add_child(_overlay)
 		_spawn_local_players()
+		_start_round()
 	else:
 		_setup_network()
 
 
+func _exit_tree() -> void:
+	Engine.time_scale = 1.0
+
+
+func _process(delta: float) -> void:
+	_update_camera(delta)
+
+
+# ── Camera ──────────────────────────────────────────────────────────────────
+
+func _update_camera(delta: float) -> void:
+	if _players.size() < 2 or not is_instance_valid(_players[0]) or not is_instance_valid(_players[1]):
+		return
+	var a: Vector2 = _players[0].global_position
+	var b: Vector2 = _players[1].global_position
+	var vp := get_viewport_rect().size
+	var dist := absf(a.x - b.x)
+
+	var target_zoom := clampf(vp.x / (dist + 700.0), 0.75, 1.15)
+	var z := lerpf(_camera.zoom.x, target_zoom, clampf(4.0 * delta, 0.0, 1.0))
+	_camera.zoom = Vector2(z, z)
+
+	var half_w := vp.x / (2.0 * z)
+	var limit := maxf(0.0, FLOOR_HALF_W - half_w)
+	var tx := clampf((a.x + b.x) * 0.5, -limit, limit)
+	var ty := CAMERA_FLOOR_Y - vp.y / z * 0.27
+	_camera.position = _camera.position.lerp(Vector2(tx, ty), clampf(6.0 * delta, 0.0, 1.0))
+
+	_shake = move_toward(_shake, 0.0, 60.0 * delta)
+	_camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
+
+
+func shake(amount: float) -> void:
+	_shake = maxf(_shake, amount)
+
+
+## kind: 0 = blocked, 1 = hit, 2 = heavy hit.  dir is the defender's facing (sparks spray the other way).
+func hit_effect(pos: Vector2, kind: int, dir: int) -> void:
+	var p := CPUParticles2D.new()
+	p.position = pos
+	p.z_index = 20
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.amount = [8, 14, 26][kind]
+	p.lifetime = [0.2, 0.3, 0.45][kind]
+	p.direction = Vector2(-dir, -0.3)
+	p.spread = [70.0, 110.0, 160.0][kind]
+	p.initial_velocity_min = [80.0, 160.0, 220.0][kind]
+	p.initial_velocity_max = [180.0, 380.0, 560.0][kind]
+	p.gravity = Vector2(0, 600)
+	p.scale_amount_min = [3.0, 4.0, 5.0][kind]
+	p.scale_amount_max = [5.0, 8.0, 12.0][kind]
+	var base: Color = [Color(0.6, 0.9, 1.0), Color(1.0, 0.85, 0.3), Color(1.0, 0.35, 0.2)][kind]
+	var ramp := Gradient.new()
+	ramp.set_color(0, base)
+	ramp.set_color(1, Color(base.r, base.g, base.b, 0.0))
+	p.color_ramp = ramp
+	add_child(p)
+	p.emitting = true
+	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+
+
+# ── Scene dressing ──────────────────────────────────────────────────────────
+
 func _setup_background() -> void:
+	# Screen-fixed dusk sky behind everything.
+	var sky_layer := CanvasLayer.new()
+	sky_layer.layer = -110
+	add_child(sky_layer)
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	grad.colors = PackedColorArray([Color(0.07, 0.06, 0.2), Color(0.45, 0.2, 0.4), Color(0.98, 0.55, 0.3)])
+	var gtex := GradientTexture2D.new()
+	gtex.gradient = grad
+	gtex.fill_from = Vector2(0, 0)
+	gtex.fill_to = Vector2(0, 1)
+	var sky := TextureRect.new()
+	sky.texture = gtex
+	sky.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	sky.stretch_mode = TextureRect.STRETCH_SCALE
+	sky.set_anchors_preset(Control.PRESET_FULL_RECT)
+	sky_layer.add_child(sky)
+	var moon := Polygon2D.new()
+	var pts := PackedVector2Array()
+	for i in range(40):
+		pts.append(Vector2(cos(TAU * i / 40.0), sin(TAU * i / 40.0)) * 60.0)
+	moon.polygon = pts
+	moon.color = Color(1.0, 0.93, 0.8, 0.9)
+	moon.position = Vector2(960, 190)
+	sky_layer.add_child(moon)
+
+	# Two mountain ridges that scroll slower than the fighters.
 	var parallax := ParallaxBackground.new()
-	var layer    := ParallaxLayer.new()
-	layer.motion_scale = Vector2(0.15, 0.15)
-	var tex := TextureRect.new()
-	tex.texture  = load("res://assets/background.svg")
-	tex.position = Vector2(-960, -540)
-	layer.add_child(tex)
-	parallax.add_child(layer)
 	add_child(parallax)
+	_add_ridge(parallax, 0.18, Color(0.32, 0.18, 0.4),  260.0, 0.0057, 1.3)
+	_add_ridge(parallax, 0.38, Color(0.17, 0.1, 0.25), 150.0, 0.011, 4.1)
+
+
+func _add_ridge(parent: Node, scroll: float, color: Color, height: float, freq: float, seed_off: float) -> void:
+	var layer := ParallaxLayer.new()
+	layer.motion_scale = Vector2(scroll, 1.0)
+	var poly := Polygon2D.new()
+	var pts := PackedVector2Array()
+	for x in range(-4000, 4001, 40):
+		var n := sin(x * freq + seed_off) * 0.5 + sin(x * freq * 2.7 + seed_off * 2.0) * 0.3 + sin(x * freq * 6.1) * 0.12
+		pts.append(Vector2(x, 140.0 - height * (0.55 + 0.45 * n)))
+	pts.append(Vector2(4000, 400))
+	pts.append(Vector2(-4000, 400))
+	poly.polygon = pts
+	poly.color = color
+	layer.add_child(poly)
+	parent.add_child(layer)
 
 
 func _setup_platform() -> void:
@@ -59,37 +181,140 @@ func _setup_platform() -> void:
 		pt.size           = Vector2(3000, 40)
 		pt.position       = Vector2(-1500, -20)
 		pt.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+		pt.modulate       = Color(0.72, 0.62, 0.85)  # blend the grass into the dusk palette
 		floor_node.add_child(pt)
 
 
 func _setup_hud() -> void:
-	if not get_node_or_null("TekkenHUD"):
-		var hud = preload("res://scripts/tekken_hud.gd").new()
-		hud.name = "TekkenHUD"
-		add_child(hud)
+	_hud = get_node_or_null("TekkenHUD")
+	if not _hud:
+		_hud = preload("res://scripts/tekken_hud.gd").new()
+		_hud.name = "TekkenHUD"
+		add_child(_hud)
+	if _hud.has_signal("time_up") and local_mode:
+		_hud.time_up.connect(_on_time_up)
 
+
+# ── Local match flow ────────────────────────────────────────────────────────
 
 func _spawn_local_players() -> void:
 	var scene: PackedScene = preload("res://scenes/player.tscn")
+	var root := get_tree().root
+	var vs_cpu: bool = root.get_meta("vs_cpu") if root.has_meta("vs_cpu") else false
+	var picks: Array[String] = [
+		root.get_meta("p1_char") if root.has_meta("p1_char") else "Fighter",
+		root.get_meta("p2_char") if root.has_meta("p2_char") else "Samurai",
+	]
 	for i in range(2):
 		var p = scene.instantiate()
 		p.name          = "Player%d" % i
 		p.player_index  = i
 		p.local_mode    = true
+		p.char_id       = picks[i]
+		p.is_cpu        = (i == 1 and vs_cpu)
 		p.position      = SPAWN_POINTS[i]
+		if i == 1 and picks[0] == picks[1]:
+			p.tint = Color(1.0, 0.6, 0.6)  # mirror match: tint P2 so they can be told apart
 		if i == 1:
 			p.facing_direction = -1
 		_players_node.add_child(p)
 		_players.append(p)
 
-	if _players.size() == 2:
-		_players[0]._opponent = _players[1]
-		_players[1]._opponent = _players[0]
+	_players[0]._opponent = _players[1]
+	_players[1]._opponent = _players[0]
 
-	print("[GameManager] Local players spawned.")
+	var f1 := FighterData.get_fighter(picks[0])
+	var f2 := FighterData.get_fighter(picks[1])
+	_hud.set_fighters(f1["name"], f1["color"], ("CPU " if vs_cpu else "") + f2["name"], f2["color"])
+	print("[GameManager] Local players spawned: %s vs %s%s" % [picks[0], picks[1], " (CPU)" if vs_cpu else ""])
 
+
+func _sleep(seconds: float) -> void:
+	# Real-time wait: unaffected by the K.O. slow-motion.
+	await get_tree().create_timer(seconds, false, false, true).timeout
+
+
+func _start_round() -> void:
+	_round_over = false
+	_hud.reset_round()
+	_hud.set_round(_round)
+	_hud.set_wins(_wins[0], _wins[1])
+	for i in range(_players.size()):
+		var p = _players[i]
+		p.reset_for_new_round(SPAWN_POINTS[i])
+		p.facing_direction = 1 if i == 0 else -1
+		p.input_locked = true
+
+	await _sleep(0.6)
+	_hud.show_announcement("ROUND %d" % _round, Color.WHITE)
+	await _sleep(1.1)
+	_hud.show_announcement("FIGHT!", Color(1.0, 0.85, 0.1))
+	for p in _players:
+		p.input_locked = false
+	_hud.start_clock()
+	await _sleep(0.8)
+	if not _round_over:
+		_hud.clear_announcement()
+
+
+func _on_time_up() -> void:
+	if _round_over:
+		return
+	_round_over = true
+	_lock_players()
+	var h0: int = _players[0].health
+	var h1: int = _players[1].health
+	await _sleep(1.2)
+	_finish_round(0 if h0 > h1 else (1 if h1 > h0 else -1))
+
+
+## Called by a fighter the moment its health hits zero.
+func on_player_ko(loser_index: int) -> void:
+	if not local_mode:
+		end_round(loser_index)
+		return
+	if _round_over:
+		return
+	_round_over = true
+	_hud.stop_round()
+	_hud.show_announcement("K.O.!", Color(1.0, 0.2, 0.2))
+	_lock_players()
+	Engine.time_scale = 0.3
+	await _sleep(0.7)
+	Engine.time_scale = 1.0
+	await _sleep(1.3)
+	_finish_round(1 - loser_index)
+
+
+func _lock_players() -> void:
+	for p in _players:
+		p.input_locked = true
+
+
+func _finish_round(winner: int) -> void:
+	_hud.stop_round()
+	if winner >= 0:
+		_wins[winner] += 1
+		_hud.set_wins(_wins[0], _wins[1])
+		var nm: String = _players[winner].get("char_id").to_upper()
+		_hud.show_announcement("%s WINS" % nm, Color(1.0, 0.85, 0.1))
+	else:
+		_hud.show_announcement("DRAW", Color.WHITE)
+	await _sleep(2.0)
+
+	if winner >= 0 and _wins[winner] >= ROUNDS_TO_WIN:
+		_match_over = true
+		_hud.show_announcement("PLAYER %d WINS THE MATCH!" % (winner + 1), Color(1.0, 0.85, 0.1))
+		_overlay.show_match_end("PLAYER %d WINS!" % (winner + 1))
+		return
+	_round += 1
+	_start_round()
+
+
+# ── Network mode (unchanged behaviour) ──────────────────────────────────────
 
 func _setup_network() -> void:
+	_hud.start_clock()
 	if _spawner:
 		_spawner.spawn_path = NodePath("../Players")
 		_spawner.add_spawnable_scene("res://scenes/player.tscn")
@@ -146,19 +371,17 @@ func _spawn_network_player(peer_id: int) -> void:
 func end_round(loser_index: int) -> void:
 	print("[GameManager] Round ended. Player %d lost." % loser_index)
 	await get_tree().create_timer(4.0).timeout
-	_reset_round()
+	_reset_network_round()
 
 
-func _reset_round() -> void:
-	var hud := get_node_or_null("TekkenHUD")
-	if hud and hud.has_method("reset_round"):
-		hud.reset_round()
+func _reset_network_round() -> void:
+	if _hud and _hud.has_method("reset_round"):
+		_hud.reset_round()
 	for i in range(_players.size()):
 		var p = _players[i]
 		if is_instance_valid(p):
 			p.reset_for_new_round(SPAWN_POINTS[i % SPAWN_POINTS.size()])
-			if i == 1:
-				p.facing_direction = -1
+			p.facing_direction = 1 if i == 0 else -1
 
 
 func _get_network_manager() -> Node:

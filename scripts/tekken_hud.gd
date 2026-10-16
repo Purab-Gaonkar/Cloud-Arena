@@ -6,6 +6,16 @@
 ## • "ROUND 1", "FIGHT!", and "K.O.!" announcements
 extends CanvasLayer
 
+signal time_up
+
+const ROUND_SECONDS: float = 99.0
+const PIPS_TO_WIN: int = 2
+
+var _round_title: Label
+var _p1_pips: Array[Panel] = []
+var _p2_pips: Array[Panel] = []
+var _round_running: bool = false
+
 var _p1_bar: ProgressBar
 var _p1_ghost: ProgressBar
 var _p2_bar: ProgressBar
@@ -20,7 +30,7 @@ var _p1_current_hp: float = 100.0
 var _p2_target_hp: float = 100.0
 var _p2_current_hp: float = 100.0
 
-var _round_time: float = 99.0
+var _round_time: float = ROUND_SECONDS
 var _match_ended: bool = false
 
 func _ready() -> void:
@@ -37,13 +47,15 @@ func _process(delta: float) -> void:
 			_p2_ghost.value = move_toward(_p2_ghost.value, _p2_target_hp, delta * 45.0)
 
 	# Round timer countdown
-	if not _match_ended and _round_time > 0.0:
+	if _round_running and not _match_ended and _round_time > 0.0:
 		_round_time -= delta
-		if _round_time < 0.0:
+		if _round_time <= 0.0:
 			_round_time = 0.0
-			_show_announcement("TIME UP!", Color.GOLD)
+			_round_running = false
+			show_announcement("TIME UP!", Color.GOLD)
+			time_up.emit()
 		if _timer_label:
-			_timer_label.text = str(int(_round_time))
+			_timer_label.text = str(ceili(_round_time))
 			if _round_time <= 10.0:
 				_timer_label.add_theme_color_override("font_color", Color(1.0, 0.2, 0.2))
 
@@ -69,6 +81,7 @@ func _build_hud() -> void:
 	top_panel.add_child(center_box)
 
 	var round_title = Label.new()
+	_round_title = round_title
 	round_title.text = "ROUND 1"
 	round_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	round_title.add_theme_font_size_override("font_size", 14)
@@ -105,7 +118,7 @@ func _build_hud() -> void:
 	top_panel.add_child(p1_box)
 
 	_p1_name = Label.new()
-	_p1_name.text = "⚡ P1: JIN"
+	_p1_name.text = "P1"
 	_p1_name.position = Vector2(0, 0)
 	_p1_name.add_theme_font_size_override("font_size", 18)
 	_p1_name.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
@@ -126,7 +139,7 @@ func _build_hud() -> void:
 	top_panel.add_child(p2_box)
 
 	_p2_name = Label.new()
-	_p2_name.text = "🔥 P2: KAZUYA"
+	_p2_name.text = "P2"
 	_p2_name.size = Vector2(bar_width, 24)
 	_p2_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_p2_name.position = Vector2(0, 0)
@@ -153,8 +166,8 @@ func _build_hud() -> void:
 	_announcer_label.text = ""
 	add_child(_announcer_label)
 
-	# Trigger initial "FIGHT!" animation
-	_show_start_sequence()
+	_p1_pips = _build_pips(p1_box, false)
+	_p2_pips = _build_pips(p2_box, true)
 
 func _create_bar(pos: Vector2, b_size: Vector2, inverted: bool, fill_c: Color) -> ProgressBar:
 	var bar = ProgressBar.new()
@@ -191,13 +204,61 @@ func update_health(player_index: int, current_hp: int) -> void:
 		if _p2_bar:
 			_p2_bar.value = _p2_target_hp
 
-	if current_hp <= 0 and not _match_ended:
-		_match_ended = true
-		_show_announcement("K. O. !", Color(1.0, 0.2, 0.2))
+func _build_pips(parent: Control, right_aligned: bool) -> Array[Panel]:
+	var pips: Array[Panel] = []
+	for i in range(PIPS_TO_WIN):
+		var pip := Panel.new()
+		pip.size = Vector2(16, 16)
+		var x := (480.0 - 16.0 - i * 24.0) if right_aligned else (i * 24.0)
+		pip.position = Vector2(x, 58)
+		parent.add_child(pip)
+		pips.append(pip)
+		_style_pip(pip, false)
+	return pips
+
+
+func _style_pip(pip: Panel, filled: bool) -> void:
+	var st := StyleBoxFlat.new()
+	st.bg_color = Color(1.0, 0.82, 0.1) if filled else Color(0.1, 0.1, 0.14, 0.9)
+	st.border_color = Color(0.85, 0.72, 0.2)
+	st.set_border_width_all(2)
+	st.set_corner_radius_all(8)
+	pip.add_theme_stylebox_override("panel", st)
+
+
+func set_fighters(p1_name: String, p1_color: Color, p2_name: String, p2_color: Color) -> void:
+	_p1_name.text = "P1  " + p1_name
+	_p1_name.add_theme_color_override("font_color", p1_color)
+	_p2_name.text = p2_name + "  P2"
+	_p2_name.add_theme_color_override("font_color", p2_color)
+
+
+func set_round(n: int) -> void:
+	if _round_title:
+		_round_title.text = "ROUND %d" % n
+
+
+func set_wins(p1_wins: int, p2_wins: int) -> void:
+	for i in range(_p1_pips.size()):
+		_style_pip(_p1_pips[i], i < p1_wins)
+	for i in range(_p2_pips.size()):
+		_style_pip(_p2_pips[i], i < p2_wins)
+
+
+## Stops the clock (round over); the K.O./time-up banner stays up until the next reset.
+func stop_round() -> void:
+	_match_ended = true
+	_round_running = false
+
+
+func start_clock() -> void:
+	_round_running = true
+
 
 func reset_round() -> void:
 	_match_ended = false
-	_round_time = 99.0
+	_round_running = false
+	_round_time = ROUND_SECONDS
 	_p1_target_hp = 100.0
 	_p1_current_hp = 100.0
 	_p2_target_hp = 100.0
@@ -206,22 +267,24 @@ func reset_round() -> void:
 	if _p1_ghost: _p1_ghost.value = 100
 	if _p2_bar: _p2_bar.value = 100
 	if _p2_ghost: _p2_ghost.value = 100
-	_show_start_sequence()
+	if _timer_label:
+		_timer_label.text = str(int(ROUND_SECONDS))
+		_timer_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.2))
+	_announcer_label.text = ""
 
-func _show_start_sequence() -> void:
-	_show_announcement("READY...", Color.WHITE)
-	await get_tree().create_timer(1.0).timeout
-	_show_announcement("FIGHT!", Color(1.0, 0.85, 0.1))
-	await get_tree().create_timer(1.2).timeout
-	if not _match_ended:
-		_announcer_label.text = ""
 
-func _show_announcement(txt: String, color: Color) -> void:
+func clear_announcement() -> void:
+	_announcer_label.text = ""
+
+
+func show_announcement(txt: String, color: Color) -> void:
 	if not _announcer_label:
 		return
 	_announcer_label.text = txt
 	_announcer_label.add_theme_color_override("font_color", color)
-	_announcer_label.modulate = Color.WHITE
-	_announcer_label.scale = Vector2(1.3, 1.3)
+	_announcer_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_announcer_label.add_theme_constant_override("outline_size", 12)
+	_announcer_label.pivot_offset = _announcer_label.size * 0.5
+	_announcer_label.scale = Vector2(1.5, 1.5)
 	var tween = create_tween()
 	tween.tween_property(_announcer_label, "scale", Vector2(1.0, 1.0), 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)

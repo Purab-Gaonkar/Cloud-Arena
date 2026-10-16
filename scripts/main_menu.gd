@@ -4,6 +4,7 @@ extends Control
 var _status_label: Label
 var _ip_field:     LineEdit
 var _btn_local:    Button
+var _btn_cpu:      Button
 var _btn_matchmake: Button
 var _http_request: HTTPRequest
 
@@ -64,12 +65,17 @@ func _build_ui() -> void:
 
 	_add_spacer(center, 10)
 
+	_btn_cpu = _make_button("VS CPU  (1 Player)", Color(0.9, 0.35, 0.15))
+	_btn_cpu.pressed.connect(_on_cpu_pressed)
+	center.add_child(_btn_cpu)
+
 	_btn_local = _make_button("LOCAL PLAY  (2 Players, Same PC)", Color(0.45, 0.1, 0.9))
 	_btn_local.pressed.connect(_on_local_pressed)
 	center.add_child(_btn_local)
 
 	var hint := Label.new()
-	hint.text = "P1: WASD + J    |    P2: Arrow Keys + Numpad 0"
+	hint.text = "P1: A/D move, W jump, J attack (x3 combo), S block
+P2: Arrows move/jump, / or Numpad 0 attack, Down block"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_size_override("font_size", 12)
 	hint.add_theme_color_override("font_color", Color(0.65, 0.65, 0.75))
@@ -160,7 +166,14 @@ func _make_button(txt: String, accent: Color) -> Button:
 
 func _on_local_pressed() -> void:
 	get_tree().root.set_meta("local_mode", true)
-	get_tree().change_scene_to_file("res://scenes/game.tscn")
+	get_tree().root.set_meta("vs_cpu", false)
+	get_tree().change_scene_to_file("res://scenes/character_select.tscn")
+
+
+func _on_cpu_pressed() -> void:
+	get_tree().root.set_meta("local_mode", true)
+	get_tree().root.set_meta("vs_cpu", true)
+	get_tree().change_scene_to_file("res://scenes/character_select.tscn")
 
 
 func _on_matchmake_pressed() -> void:
@@ -213,6 +226,7 @@ func _on_matchmake_completed(result: int, response_code: int, headers: PackedStr
 
 func _set_all_disabled(d: bool) -> void:
 	_btn_local.disabled = d
+	_btn_cpu.disabled = d
 	_btn_matchmake.disabled = d
 
 
