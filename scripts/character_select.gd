@@ -34,6 +34,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_poll_input()
 	_t += delta
 	if _world:
 		_world.update_parallax(sin(_t * 0.15) * 250.0)
@@ -92,9 +93,9 @@ func _build_ui() -> void:
 	var hint := UiStyle.label("", 14, UiStyle.TEXT, false, 5)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if _vs_cpu:
-		hint.text = "A / D choose      J confirm      S undo      TAB stage      ESC back"
+		hint.text = "A / D or D-pad choose      J / A confirm      S / LB undo      TAB / RB stage      ESC / B back"
 	else:
-		hint.text = "P1:  A / D choose,  J confirm,  S undo        P2:  Left / Right,  /  or Numpad 0 confirm,  Down undo        TAB stage      ESC back"
+		hint.text = "P1: A/D, J confirm, S undo     P2: Left/Right, / or Numpad 0 confirm, Down undo     (pads: D-pad, X confirm, LB undo)     TAB / RB stage     ESC back"
 	root.add_child(hint)
 
 
@@ -188,38 +189,45 @@ func _refresh() -> void:
 		_prompt.text = "BOTH PLAYERS CHOOSE, THEN CONFIRM"
 
 
-func _unhandled_input(event: InputEvent) -> void:
-	if _starting or not (event is InputEventKey) or not event.pressed or event.echo:
+func _poll_input() -> void:
+	if _starting:
 		return
-	if event.keycode == KEY_ESCAPE:
+	if Input.is_action_just_pressed("ui_pause") or Input.is_action_just_pressed("ui_cancel") and not _any_locked():
 		Transition.go(MENU_SCENE)
 		return
-	if event.keycode == KEY_TAB:
+	if Input.is_action_just_pressed("stage_next"):
 		_set_stage(_stage + 1)
+		return
+	if Input.is_action_just_pressed("stage_prev"):
+		_set_stage(_stage - 1)
 		return
 
 	if _vs_cpu:
-		# P1's keys drive both picks: first their own fighter, then the CPU opponent.
+		# P1's controls drive both picks: first their own fighter, then the CPU opponent.
 		var who := 1 if _locked[0] else 0
-		_handle(who, "move_left", "move_right", "attack", "block", event)
+		_handle(who, "move_left", "move_right", "attack", "block")
 	else:
-		_handle(0, "move_left", "move_right", "attack", "block", event)
-		_handle(1, "p2_left", "p2_right", "p2_attack", "p2_block", event)
+		_handle(0, "move_left", "move_right", "attack", "block")
+		_handle(1, "p2_left", "p2_right", "p2_attack", "p2_block")
 
 
-func _handle(who: int, left: String, right: String, confirm: String, cancel: String, event: InputEvent) -> void:
-	if event.is_action_pressed(left) and not _locked[who]:
+func _any_locked() -> bool:
+	return _locked[0] or _locked[1]
+
+
+func _handle(who: int, left: String, right: String, confirm: String, cancel: String) -> void:
+	if Input.is_action_just_pressed(left) and not _locked[who]:
 		_cursor[who] = wrapi(_cursor[who] - 1, 0, FighterData.ROSTER.size())
 		AudioManager.play("ui_move")
-	elif event.is_action_pressed(right) and not _locked[who]:
+	elif Input.is_action_just_pressed(right) and not _locked[who]:
 		_cursor[who] = wrapi(_cursor[who] + 1, 0, FighterData.ROSTER.size())
 		AudioManager.play("ui_move")
-	elif event.is_action_pressed(confirm) and not _locked[who]:
+	elif Input.is_action_just_pressed(confirm) and not _locked[who]:
 		_locked[who] = true
 		AudioManager.play("ui_select")
 		AudioManager.play("hit_heavy", -8.0)
 		_sprites[_cursor[who]].play("attack_3")
-	elif event.is_action_pressed(cancel):
+	elif Input.is_action_just_pressed(cancel):
 		AudioManager.play("ui_back")
 		if _locked[who]:
 			_locked[who] = false

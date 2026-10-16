@@ -35,6 +35,7 @@ var _shake: float = 0.0
 
 var _hud: Node = null
 var _world: Node2D = null
+var _intro_shown: bool = false
 var _cine_target: Node = null
 var _cine_layer: CanvasLayer = null
 var _cine_dim: ColorRect
@@ -136,14 +137,15 @@ func _update_camera(delta: float) -> void:
 		ty = _cine_target.global_position.y - 10.0
 	_camera.position = _camera.position.lerp(Vector2(tx, ty), clampf(6.0 * rd, 0.0, 1.0))
 	if _world:
-		_world.update_parallax(_camera.position.x)
+		_world.update_parallax(_camera.position.x, _camera.position.y)
 
 	_shake = move_toward(_shake, 0.0, 60.0 * rd)
 	_camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
 
 
 func shake(amount: float) -> void:
-	_shake = maxf(_shake, amount)
+	if GameSettings.screen_shake:
+		_shake = maxf(_shake, amount)
 
 
 func spawn_fx(fx_name: String, pos: Vector2, facing: int = 1, tint: Color = Color.WHITE, fx_scale: float = 1.0) -> void:
@@ -356,6 +358,12 @@ func _start_round() -> void:
 		p.input_locked = true
 
 	await _sleep(0.6)
+	if _round == 1 and not _intro_shown:
+		_intro_shown = true
+		var n1: String = FighterData.get_fighter(_players[0].char_id)["name"]
+		var n2: String = FighterData.get_fighter(_players[1].char_id)["name"]
+		_hud.show_announcement("%s  VS  %s" % [n1, n2], UiStyle.GOLD, 64)
+		await _sleep(1.6)
 	AudioManager.play("round_bell")
 	_hud.show_announcement("ROUND %d" % _round, Color.WHITE)
 	await _sleep(1.1)

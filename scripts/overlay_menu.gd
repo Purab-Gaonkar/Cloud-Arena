@@ -68,7 +68,7 @@ func show_match_end(text: String) -> void:
 	_mode = "match_end"
 	_title.text = "VICTORY"
 	_sub.text = text
-	_hint.text = "ENTER  Rematch          C  Change fighters          M  Main menu"
+	_hint.text = "ENTER / A  Rematch        C / X  Change fighters        M / B  Main menu"
 	_pop()
 
 
@@ -78,7 +78,7 @@ func _set_paused(paused: bool) -> void:
 	_mode = "pause" if paused else "none"
 	_title.text = "PAUSED"
 	_sub.text = ""
-	_hint.text = "ESC  Resume        R  Restart        C  Change fighters        M  Main menu"
+	_hint.text = "ESC / START  Resume      R / Y  Restart      C / X  Change fighters      M / B  Main menu"
 	if paused:
 		_pop()
 	else:
@@ -86,21 +86,25 @@ func _set_paused(paused: bool) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not (event is InputEventKey and event.pressed and not event.echo):
+	if not event.is_pressed() or event.is_echo():
 		return
-	var key: int = event.keycode
 	match _mode:
 		"none":
-			if key == KEY_ESCAPE:
+			if event.is_action_pressed("ui_pause"):
 				_set_paused(true)
 		"pause":
-			match key:
-				KEY_ESCAPE: _set_paused(false)
-				KEY_R:      Transition.reload()
-				KEY_C:      Transition.go(SELECT_SCENE)
-				KEY_M:      Transition.go(MENU_SCENE)
+			if event.is_action_pressed("ui_pause"):
+				_set_paused(false)
+			elif event.is_action_pressed("ov_restart"):
+				Transition.reload()
+			elif event.is_action_pressed("ov_select"):
+				Transition.go(SELECT_SCENE)
+			elif event.is_action_pressed("ov_menu"):
+				Transition.go(MENU_SCENE)
 		"match_end":
-			match key:
-				KEY_ENTER, KEY_KP_ENTER, KEY_R: Transition.reload()
-				KEY_C:                          Transition.go(SELECT_SCENE)
-				KEY_M, KEY_ESCAPE:              Transition.go(MENU_SCENE)
+			if event.is_action_pressed("ui_accept") or event.is_action_pressed("ov_restart"):
+				Transition.reload()
+			elif event.is_action_pressed("ov_select"):
+				Transition.go(SELECT_SCENE)
+			elif event.is_action_pressed("ov_menu") or event.is_action_pressed("ui_pause"):
+				Transition.go(MENU_SCENE)

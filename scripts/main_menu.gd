@@ -5,6 +5,7 @@ extends Control
 const UiStyle      := preload("res://scripts/ui_style.gd")
 const FighterData  := preload("res://scripts/fighter_data.gd")
 const WorldBuilder := preload("res://scripts/world_builder.gd")
+const ControlsPanel := preload("res://scripts/controls_panel.gd")
 
 const SELECT_SCENE: String = "res://scenes/character_select.tscn"
 const FIGHTER_SCALE: float = 2.2
@@ -179,7 +180,6 @@ func _make_modal(title: String, size_v: Vector2) -> Control:
 
 	var panel := Panel.new()
 	panel.name = "Panel"
-	panel.set_anchors_preset(Control.PRESET_CENTER)
 	panel.position = Vector2(640, 360) - size_v * 0.5
 	panel.size = size_v
 	panel.pivot_offset = size_v * 0.5
@@ -260,37 +260,11 @@ func _build_online_modal() -> void:
 
 
 func _build_controls_modal() -> void:
-	_modal_controls = _make_modal("CONTROLS", Vector2(760, 530))
+	_modal_controls = _make_modal("CONTROLS", Vector2(1000, 600))
 	var panel: Control = _modal_controls.get_node("Panel")
-	var rows := [
-		["", "PLAYER 1", "PLAYER 2"],
-		["Move", "A / D", "Left / Right"],
-		["Jump", "W  or  Space", "Up"],
-		["Attack  (tap x3 = combo)", "J  or  Left Click", "/  or  Numpad 0"],
-		["Block  (face your enemy)", "S  or  K", "Down  or  ."],
-		["Heavy attack", "U", ",  or  Numpad 1"],
-		["Super finisher  (meter full)", "I", "M  or  Numpad 2"],
-		["Pause", "Esc", "Esc"],
-	]
-	var xs := [30.0, 300.0, 530.0]
-	for r in range(rows.size()):
-		for c in range(3):
-			var head: bool = (r == 0)
-			var col: Color = UiStyle.TEXT if c > 0 else UiStyle.MUTED
-			if head and c == 1:
-				col = UiStyle.P1
-			elif head and c == 2:
-				col = UiStyle.P2
-			var l := UiStyle.label(rows[r][c], 26 if head else 20, col, head, 5 if head else 0)
-			if not head:
-				l.add_theme_font_override("font", UiStyle.body_font())
-			l.position = Vector2(xs[c], 90 + r * 44)
-			panel.add_child(l)
-	var back := UiStyle.button("BACK", Color(0.6, 0.6, 0.75))
-	back.position = Vector2(30, 465)
-	back.size = Vector2(240, 46)
-	back.pressed.connect(_close_modals)
-	panel.add_child(back)
+	var cp := ControlsPanel.new()
+	cp.back_requested.connect(_close_modals)
+	panel.add_child(cp)
 
 
 # ── Actions ─────────────────────────────────────────────────────────────────
@@ -328,11 +302,11 @@ func _on_options_pressed() -> void:
 
 
 func _build_options_modal() -> void:
-	_modal_options = _make_modal("OPTIONS", Vector2(620, 330))
+	_modal_options = _make_modal("OPTIONS", Vector2(620, 520))
 	var panel: Control = _modal_options.get_node("Panel")
 	var rows := [["MUSIC", AudioManager.music_volume, 0], ["SOUND FX", AudioManager.sfx_volume, 1]]
 	for r in rows:
-		var y: float = 100.0 + float(r[2]) * 70.0
+		var y: float = 96.0 + float(r[2]) * 56.0
 		var lbl := UiStyle.label(r[0], 24, UiStyle.TEXT, true, 5)
 		lbl.position = Vector2(30, y)
 		panel.add_child(lbl)
@@ -353,8 +327,39 @@ func _build_options_modal() -> void:
 				AudioManager.set_sfx_volume(v)
 				AudioManager.play("hit_light"))
 		panel.add_child(slider)
+
+	var diff := UiStyle.button("", Color(0.95, 0.4, 0.15), 48.0)
+	diff.position = Vector2(30, 216)
+	diff.size = Vector2(560, 48)
+	var upd_diff := func() -> void: diff.text = "CPU DIFFICULTY:   %s" % GameSettings.LEVEL_NAMES[GameSettings.cpu_level]
+	upd_diff.call()
+	diff.pressed.connect(func() -> void:
+		GameSettings.cycle_cpu_level()
+		upd_diff.call())
+	panel.add_child(diff)
+
+	var shake := UiStyle.button("", Color(0.55, 0.3, 1.0), 48.0)
+	shake.position = Vector2(30, 276)
+	shake.size = Vector2(560, 48)
+	var upd_shake := func() -> void: shake.text = "SCREEN SHAKE:   %s" % ("ON" if GameSettings.screen_shake else "OFF")
+	upd_shake.call()
+	shake.pressed.connect(func() -> void:
+		GameSettings.set_screen_shake(not GameSettings.screen_shake)
+		upd_shake.call())
+	panel.add_child(shake)
+
+	var fs := UiStyle.button("", Color(0.15, 0.7, 0.55), 48.0)
+	fs.position = Vector2(30, 336)
+	fs.size = Vector2(560, 48)
+	var upd_fs := func() -> void: fs.text = "FULLSCREEN (F11):   %s" % ("ON" if GameSettings.fullscreen else "OFF")
+	upd_fs.call()
+	fs.pressed.connect(func() -> void:
+		GameSettings.set_fullscreen(not GameSettings.fullscreen)
+		upd_fs.call())
+	panel.add_child(fs)
+
 	var back := UiStyle.button("BACK", Color(0.6, 0.6, 0.75))
-	back.position = Vector2(30, 250)
+	back.position = Vector2(30, 430)
 	back.size = Vector2(240, 46)
 	back.pressed.connect(_close_modals)
 	panel.add_child(back)

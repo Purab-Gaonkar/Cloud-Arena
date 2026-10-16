@@ -64,31 +64,48 @@ func build(stage_index: int, viewport_size: Vector2 = Vector2(1280, 720)) -> voi
 	z_index = -100
 	_build_sky(viewport_size)
 
-	# Far to near.
+	# Far to near. Atmospheric perspective: distant layers are pulled toward the mist colour.
+	var mist_c: Color = theme["mist"]
 	var l_clouds := _layer(0.08)
 	for i in range(7):
 		var c := _spawn(l_clouds, "cloud", Vector2(-2400 + i * 760, GROUND_Y - 520 + (i % 3) * 70), theme["cloud"], Color.WHITE, 420.0 + (i % 3) * 120.0, 90.0, 1.0, 0.0, i * 7)
 		c.set_meta("speed", 6.0 + (i % 4) * 3.0)
 		_clouds.append(c)
 
+	var l_far2 := _layer(0.1)
+	_spawn(l_far2, "ridge", Vector2(0, GROUND_Y - 50), theme["far"].lerp(mist_c, 0.55), Color.WHITE, 7000.0, 400.0, 1.0, 0.0031, 9)
+
 	var l_far := _layer(0.14)
 	_spawn(l_far, "ridge", Vector2(0, GROUND_Y), theme["far"], Color.WHITE, 7000.0, 330.0, 1.0, 0.0045, 2)
 
+	var l_haze := _layer(0.2)
+	_spawn(l_haze, "mist", Vector2(0, GROUND_Y - 20), mist_c, Color.WHITE, 7000.0, 320.0, 1.0, 0.2)
+
 	var l_pag := _layer(0.26)
-	_spawn(l_pag, "pagoda", Vector2(-950, GROUND_Y + 10), theme["pagoda"], theme["glow"], 100.0, 100.0, 1.25)
-	_spawn(l_pag, "pagoda", Vector2(1100, GROUND_Y + 10), theme["pagoda"], theme["glow"], 100.0, 100.0, 0.95)
-	_spawn(l_pag, "pagoda", Vector2(-120, GROUND_Y + 10), theme["pagoda"], theme["glow"], 100.0, 100.0, 0.7)
+	_spawn(l_pag, "pagoda", Vector2(-950, GROUND_Y + 10), theme["pagoda"].lerp(mist_c, 0.25), theme["glow"], 100.0, 100.0, 1.25)
+	_spawn(l_pag, "pagoda", Vector2(1100, GROUND_Y + 10), theme["pagoda"].lerp(mist_c, 0.25), theme["glow"], 100.0, 100.0, 0.95)
+	_spawn(l_pag, "pagoda", Vector2(-120, GROUND_Y + 10), theme["pagoda"].lerp(mist_c, 0.3), theme["glow"], 100.0, 100.0, 0.7)
 
 	var l_mid := _layer(0.4)
 	_spawn(l_mid, "ridge", Vector2(0, GROUND_Y), theme["mid"], Color.WHITE, 7000.0, 200.0, 1.0, 0.0085, 5)
 
+	var l_rays := _layer(0.45)
+	var ray_col: Color = theme["orb_glow"]
+	_spawn(l_rays, "rays", Vector2(0, GROUND_Y - 760), ray_col, Color.WHITE, 3000.0, 880.0, 1.0, 0.2, 3)
+
 	var l_pine := _layer(0.55)
 	for i in range(18):
 		var x := -2600 + i * 300 + (i * 97) % 140
-		_spawn(l_pine, "pine", Vector2(x, GROUND_Y + 6), theme["near"], Color.WHITE, 90.0 + (i % 4) * 22.0, 170.0 + (i % 3) * 50.0)
+		_spawn(l_pine, "pine", Vector2(x, GROUND_Y + 6), theme["near"].lerp(mist_c, 0.12), Color.WHITE, 90.0 + (i % 4) * 22.0, 170.0 + (i % 3) * 50.0)
 
 	var l_mist := _layer(0.62)
-	_spawn(l_mist, "mist", Vector2(0, GROUND_Y + 10), theme["mist"], Color.WHITE, 7000.0, 220.0, 1.0, 0.34)
+	_spawn(l_mist, "mist", Vector2(0, GROUND_Y + 10), mist_c, Color.WHITE, 7000.0, 220.0, 1.0, 0.34)
+
+	var l_trees := _layer(0.72)
+	var tree_leaf: Color = theme["near"].lerp(theme["leaf"], 0.22)
+	var tree_xs := [-2200, -1500, -950, 950, 1500, 2200]
+	for i in range(tree_xs.size()):
+		_spawn(l_trees, "sakura", Vector2(tree_xs[i], GROUND_Y + 8), tree_leaf, tree_leaf.lightened(0.12), 380.0, 430.0 + (i % 3) * 50.0, 1.0, 0.0, 20 + i, theme["bark"])
 
 	var l_obj := _layer(0.86)
 	_spawn(l_obj, "torii", Vector2(0, GROUND_Y + 4), theme["torii"], theme["torii_dark"], 100.0, 100.0, 1.55)
@@ -98,22 +115,102 @@ func build(stage_index: int, viewport_size: Vector2 = Vector2(1280, 720)) -> voi
 		_spawn(l_obj, "bamboo", Vector2(sx * 900, GROUND_Y + 4), theme["bamboo"], theme["bamboo"].lightened(0.25), 100.0, 300.0, 1.0, 0.0, int(absf(sx) * 5 + 2))
 		_spawn(l_obj, "lantern", Vector2(sx * 1700, GROUND_Y + 4), theme["pagoda"].lightened(0.15), theme["glow"], 100.0, 100.0, 1.45, 0.0, 9)
 
+	var l_hang := _layer(0.93)
+	for sx in [-1.0, 1.0]:
+		for k in range(3):
+			_spawn(l_hang, "hang_lantern", Vector2(sx * (560 + k * 330), GROUND_Y - 600), theme["torii_dark"], theme["glow"], 100.0, 250.0 + k * 40.0, 1.0, 0.0, int(sx * 7) + k, theme["bark"])
+
 	var l_floor := _layer(1.0)
 	_spawn(l_floor, "floor", Vector2(0, GROUND_Y), theme["floor"], theme["floor_edge"], 3600.0, 800.0, 1.0, 0.0, 0, theme["floor_line"])
 
 	_build_particles()
 
-	var l_fg := _layer(1.35)
-	l_fg.z_index = 220
+	# Foreground planes (blurred, in front of the fighters) give the Hollow-Knight-style depth.
+	var dark: Color = theme["torii_dark"]
+	var l_fg1 := _layer(1.18, 1.2)
+	l_fg1.z_index = 220
+	for i in range(8):
+		var x := -2200 + i * 620 + (i * 131) % 180
+		if absf(x) < 420:
+			continue
+		_spawn(l_fg1, "fern", Vector2(x, GROUND_Y + 125), dark, theme["bamboo"].darkened(0.55), 200.0 + (i % 3) * 40.0, 120.0 + (i % 4) * 25.0, 1.0, 0.0, i + 3)
 	for sx in [-1.0, 1.0]:
-		_spawn(l_fg, "grass", Vector2(sx * 760, GROUND_Y + 150), theme["torii_dark"], Color.WHITE, 700.0, 60.0, 1.0, 0.0, int(absf(sx) * 4))
+		_spawn(l_fg1, "rock", Vector2(sx * 980, GROUND_Y + 135), dark, dark.lightened(0.08), 240.0, 95.0, 1.0, 0.0, int(absf(sx) * 4))
+
+	var l_fg2 := _layer(1.5, 2.6)
+	l_fg2.z_index = 230
+	for sx in [-1.0, 1.0]:
+		_spawn(l_fg2, "bamboo", Vector2(sx * 1060, GROUND_Y + 190), dark, dark.lightened(0.05), 100.0, 640.0, 1.0, 0.0, 6 + int(absf(sx)))
+		_spawn(l_fg2, "vine", Vector2(sx * 760, GROUND_Y - 640), dark, theme["bamboo"].darkened(0.5), 120.0, 400.0, 1.0, 0.0, int(sx * 5) + 1)
+		_spawn(l_fg2, "vine", Vector2(sx * 1180, GROUND_Y - 640), dark, theme["bamboo"].darkened(0.5), 120.0, 300.0, 1.0, 0.0, int(sx * 5) + 4)
+
+	_build_vignette()
 
 
-func _layer(factor: float) -> Node2D:
-	var n := Node2D.new()
+func _layer(factor: float, blur: float = 0.0) -> Node2D:
+	var n: Node2D
+	if blur > 0.0:
+		var g := CanvasGroup.new()
+		g.fit_margin = 60.0
+		var mat := ShaderMaterial.new()
+		mat.shader = _blur_shader()
+		mat.set_shader_parameter("radius", blur)
+		g.material = mat
+		n = g
+	else:
+		n = Node2D.new()
 	add_child(n)
 	_layers.append({"node": n, "f": factor})
 	return n
+
+
+static var _blur_shader_cache: Shader
+
+
+## Soft-focus pass for foreground CanvasGroups (samples the group's own rendering).
+static func _blur_shader() -> Shader:
+	if _blur_shader_cache == null:
+		_blur_shader_cache = Shader.new()
+		_blur_shader_cache.code = """
+shader_type canvas_item;
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disable;
+uniform float radius = 2.0;
+void fragment() {
+	vec2 px = SCREEN_PIXEL_SIZE * radius;
+	vec4 sum = vec4(0.0);
+	float wsum = 0.0;
+	for (int x = -3; x <= 3; x++) {
+		for (int y = -3; y <= 3; y++) {
+			float w = exp(-float(x * x + y * y) / 5.0);
+			sum += texture(screen_tex, SCREEN_UV + vec2(float(x), float(y)) * px) * w;
+			wsum += w;
+		}
+	}
+	COLOR = sum / wsum;
+}
+"""
+	return _blur_shader_cache
+
+
+func _build_vignette() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 5
+	add_child(layer)
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.5, 1.0])
+	grad.colors = PackedColorArray([Color(0, 0, 0, 0.0), Color(0.02, 0.0, 0.06, 0.55)])
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	var rect := TextureRect.new()
+	rect.texture = tex
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_SCALE
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(rect)
 
 
 func _spawn(parent: Node, kind: String, pos: Vector2, c1: Color, c2: Color, w: float, h: float, sc: float = 1.0, extra: float = 0.0, rseed: int = 0, c3: Color = Color.GRAY) -> Node2D:
@@ -172,7 +269,7 @@ func _build_sky(vp: Vector2) -> void:
 
 func _build_particles() -> void:
 	var p := CPUParticles2D.new()
-	p.z_index = 150
+	p.z_index = 99
 	p.local_coords = false
 	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
 	p.color = theme["fx_color"]
@@ -224,9 +321,18 @@ func _build_particles() -> void:
 	add_child(p)
 
 
-func update_parallax(cam_x: float) -> void:
+var _base_y: float = INF
+
+
+func update_parallax(cam_x: float, cam_y: float = INF) -> void:
+	var dy := 0.0
+	if cam_y != INF:
+		if _base_y == INF:
+			_base_y = cam_y
+		dy = cam_y - _base_y
 	for l in _layers:
-		l["node"].position.x = cam_x * (1.0 - float(l["f"]))
+		var inv := 1.0 - float(l["f"])
+		l["node"].position = Vector2(cam_x * inv, dy * inv * 0.6)
 
 
 func _process(delta: float) -> void:

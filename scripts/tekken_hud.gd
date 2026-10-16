@@ -284,7 +284,8 @@ func clear_announcement() -> void:
 	_band.color.a = 0.0
 
 
-func show_announcement(txt: String, color: Color) -> void:
+func show_announcement(txt: String, color: Color, font_size: int = 118) -> void:
+	_announcer.add_theme_font_size_override("font_size", font_size)
 	_announcer.text = txt
 	_announcer.add_theme_color_override("font_color", color)
 	_announcer.pivot_offset = _announcer.size * 0.5

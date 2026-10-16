@@ -299,3 +299,13 @@ chmod +x cloud-run/deploy_cloudrun.sh
 - **Super moves** are data in `FighterData.ROSTER[...]["super"]` (dash segments, teleports, timed hits). `game_manager.super_cinematic()` runs the freeze-frame intro, then calls `begin_super_strike()` on the fighter.
 - **Generated art**: `python tools/gen_sprites.py` (needs `pip install pillow numpy`) rebuilds `assets/generated/` - derived Heavy/Super strips per fighter plus FX sheets (slashes, impact, shockwave, aura, speed lines...). Hand-drawn replacements can use the same file names/frame sizes (`FighterData.FX`). Spawn FX with `FxSprite.spawn()` (`scripts/fx_sprite.gd`).
 - **Audio**: `AudioManager` autoload (`scripts/audio_manager.gd`) - music crossfades, pooled SFX, Music/SFX buses, volume sliders saved to `user://settings.cfg`. Logical names map to files in `assets/audio/` (all CC0, see `assets/audio/CREDITS.md`). Missing files are skipped silently.
+
+
+---
+
+## 9. Controller support, rebinding, depth layers, settings
+
+- **`InputConfig` autoload** (`scripts/input_config.gd`) owns every gameplay binding (keyboard + gamepad) for both players and rebuilds the `InputMap` at startup from defaults + `user://controls.cfg`. P1 gamepad = device 0, P2 = device 1. Default pad layout: stick/D-pad move, A jump, X attack, Y heavy, LB/LT block, B/RB/RT super, Start pause. Rebind UI: `scripts/controls_panel.gd` (Main menu > Controls). Do not edit action events in `project.godot` - they are overwritten at runtime.
+- Menu-level actions (`ui_pause`, `ov_*`, `stage_next/prev`) are fixed and registered by `InputConfig`; scenes should poll actions (`Input.is_action_just_pressed`) rather than key codes so pads and rebinding keep working.
+- **`GameSettings` autoload** (`scripts/game_settings.gd`): CPU difficulty (EASY/NORMAL/HARD, used by the AI in `player_controller.gd`), screen shake, fullscreen (F11). Audio volumes live in `AudioManager`; both save to `user://settings.cfg`.
+- **World depth**: `WorldBuilder` now has ~16 parallax layers (far ridges + haze, light rays, mid trees, hanging lanterns) and two blurred foreground planes in front of the fighters (CanvasGroup + soft-focus shader), plus a vignette. `update_parallax(cam_x, cam_y)` drives them; new sprite kinds live in `scripts/scenery.gd` (vine, hang_lantern, fern, rock, rays).

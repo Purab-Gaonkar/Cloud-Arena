@@ -20,6 +20,8 @@ config/icon="res://icon.svg"
 NetworkManager="*res://scripts/network_manager.gd"
 Transition="*res://scripts/transition.gd"
 AudioManager="*res://scripts/audio_manager.gd"
+InputConfig="*res://scripts/input_config.gd"
+GameSettings="*res://scripts/game_settings.gd"
 
 [display]
 

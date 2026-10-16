@@ -215,11 +215,12 @@ func _sample_cpu_input(delta: float) -> void:
 	var dir := signf(dx)
 	var range_px: float = BODY_SIZE.x + float(_fighter["reach"]) - 10.0
 
+	var lvl: int = GameSettings.cpu_level
 	_ai_timer  -= delta
 	_ai_atk_cd -= delta
 	var opp_swinging: bool = _opponent.current_state == State.ATTACK and dist < range_px + 60.0
 	if _ai_timer <= 0.0 or (opp_swinging and _ai_mode != "block" and randf() < 0.04):
-		_ai_decide(dist, range_px, opp_swinging)
+		_ai_decide(dist, range_px, opp_swinging, lvl)
 
 	match _ai_mode:
 		"approach":
@@ -238,18 +239,18 @@ func _sample_cpu_input(delta: float) -> void:
 				_input_move_dir = dir
 			elif _ai_atk_cd <= 0.0:
 				var roll := randf()
-				if meter >= METER_MAX and roll < 0.6:
+				if meter >= METER_MAX and roll < [0.2, 0.6, 0.9][lvl]:
 					_input_special = true
-				elif roll < 0.2:
+				elif roll < [0.08, 0.2, 0.3][lvl]:
 					_input_heavy = true
 				else:
 					_input_attack = true
-				_ai_atk_cd = randf_range(0.28, 0.5)
+				_ai_atk_cd = randf_range(0.28, 0.5) * [1.7, 1.0, 0.7][lvl]
 
 
-func _ai_decide(dist: float, range_px: float, opp_swinging: bool) -> void:
+func _ai_decide(dist: float, range_px: float, opp_swinging: bool, lvl: int = 1) -> void:
 	var r := randf()
-	if opp_swinging and r < 0.6:
+	if opp_swinging and r < [0.25, 0.6, 0.9][lvl]:
 		_ai_mode  = "block"
 		_ai_timer = randf_range(0.35, 0.6)
 	elif dist <= range_px + 20.0:

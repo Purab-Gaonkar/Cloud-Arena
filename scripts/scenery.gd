@@ -21,11 +21,19 @@ func _ready() -> void:
 		rng.seed = seed_val
 		for i in range(110):
 			_stars.append([Vector2(rng.randf() * w, rng.randf() * h), rng.randf_range(0.8, 2.4), rng.randf() * TAU, rng.randf_range(0.8, 3.0)])
-	set_process(kind in ["lantern", "stars", "moon"])
+	set_process(kind in ["lantern", "stars", "moon", "vine", "hang_lantern", "rays"])
+	if kind == "rays":
+		var mat := CanvasItemMaterial.new()
+		mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+		material = mat
 
 
 func _process(delta: float) -> void:
 	_t += delta
+	if kind == "vine" or kind == "hang_lantern":
+		rotation = sin(_t * 0.8 + seed_val * 1.7) * (0.03 if kind == "vine" else 0.05)
+		if kind == "vine":
+			return
 	queue_redraw()
 
 
@@ -44,6 +52,11 @@ func _draw() -> void:
 		"grass":   _draw_grass()
 		"stars":   _draw_stars()
 		"moon":    _draw_moon()
+		"vine":    _draw_vine()
+		"hang_lantern": _draw_hang_lantern()
+		"fern":    _draw_fern()
+		"rock":    _draw_rock()
+		"rays":    _draw_rays()
 
 
 func _ellipse(center: Vector2, rx: float, ry: float, col: Color) -> void:
@@ -215,3 +228,87 @@ func _draw_moon() -> void:
 	draw_circle(Vector2.ZERO, w, c1)
 	draw_circle(Vector2(-w * 0.3, -w * 0.2), w * 0.18, Color(0, 0, 0, 0.07))
 	draw_circle(Vector2(w * 0.25, w * 0.3), w * 0.12, Color(0, 0, 0, 0.07))
+
+
+## Vine / branch hanging from the top. Origin = attach point, grows downward by h.
+func _draw_vine() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_val
+	var pts := PackedVector2Array()
+	var segs := 14
+	for i in range(segs + 1):
+		var t := float(i) / segs
+		pts.append(Vector2(sin(t * 3.2 + seed_val) * w * 0.12 * t, h * t))
+	for i in range(segs):
+		var wd := lerpf(7.0, 2.0, float(i) / segs)
+		draw_line(pts[i], pts[i + 1], c1, wd)
+	for i in range(2, segs + 1, 2):
+		var side := -1.0 if i % 4 == 0 else 1.0
+		var base := pts[i]
+		var ll := rng.randf_range(24.0, 44.0)
+		draw_colored_polygon(PackedVector2Array([base, base + Vector2(side * ll, ll * 0.35), base + Vector2(side * ll * 0.5, ll * 0.95)]), c2)
+		draw_colored_polygon(PackedVector2Array([base, base + Vector2(-side * ll * 0.8, ll * 0.5), base + Vector2(-side * ll * 0.3, ll * 0.9)]), c1)
+
+
+func _draw_hang_lantern() -> void:
+	var glow := 0.16 + 0.05 * sin(_t * 4.0 + seed_val)
+	draw_line(Vector2.ZERO, Vector2(0, h), c1, 2.0)
+	var c := Vector2(0, h + 34.0)
+	draw_circle(c, 84.0, Color(c2.r, c2.g, c2.b, glow * 0.5))
+	draw_circle(c, 48.0, Color(c2.r, c2.g, c2.b, glow))
+	_ellipse(c, 26.0, 34.0, Color(c2.r, c2.g, c2.b, 0.92))
+	_ellipse(c, 26.0, 34.0, Color(c1.r, c1.g, c1.b, 0.18))
+	draw_rect(Rect2(-14, h, 28, 7), c1)
+	draw_rect(Rect2(-14, h + 62, 28, 7), c1)
+	for k in range(-1, 2):
+		draw_line(Vector2(k * 12.0, h + 8), Vector2(k * 12.0, h + 62), Color(c1.r, c1.g, c1.b, 0.55), 1.5)
+	draw_line(Vector2(0, h + 69), Vector2(0, h + 95), c3, 3.0)
+
+
+## Big leaf clump growing from the ground point.
+func _draw_fern() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_val
+	for i in range(11):
+		var ang := lerpf(-78.0, 78.0, float(i) / 10.0) + rng.randf_range(-8.0, 8.0)
+		var ln := h * rng.randf_range(0.55, 1.0)
+		var th := deg_to_rad(ang - 90.0)
+		var dir := Vector2(cos(th), sin(th))
+		var nrm := Vector2(-dir.y, dir.x)
+		var pts := PackedVector2Array()
+		for k in range(0, 9):
+			var t := k / 8.0
+			var curve := dir * ln * t + Vector2(0, ln * 0.18 * t * t)
+			pts.append(curve + nrm * (w * 0.09 * sin(t * PI) * (1.0 - t * 0.4)))
+		for k in range(8, -1, -1):
+			var t := k / 8.0
+			var curve := dir * ln * t + Vector2(0, ln * 0.18 * t * t)
+			pts.append(curve - nrm * (w * 0.09 * sin(t * PI) * (1.0 - t * 0.4)))
+		draw_colored_polygon(pts, c1 if i % 2 == 0 else c2)
+
+
+func _draw_rock() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_val
+	var pts := PackedVector2Array([Vector2(-w * 0.5, 0)])
+	for i in range(1, 7):
+		var t := i / 7.0
+		pts.append(Vector2(lerpf(-w * 0.5, w * 0.5, t) + rng.randf_range(-8.0, 8.0), -h * sin(t * PI) * rng.randf_range(0.7, 1.0)))
+	pts.append(Vector2(w * 0.5, 0))
+	draw_colored_polygon(pts, c1)
+	draw_colored_polygon(PackedVector2Array([pts[1], pts[2], Vector2(pts[2].x, pts[2].y + h * 0.25), Vector2(pts[1].x, pts[1].y + h * 0.2)]), c2)
+
+
+## Slanted light shafts (drawn additive). Origin = top of the shafts, they fall by h.
+func _draw_rays() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_val
+	for i in range(7):
+		var x := (i - 3) * w / 7.0 + rng.randf_range(-40.0, 40.0)
+		var wd := rng.randf_range(36.0, 110.0)
+		var slant := h * 0.45
+		var a := extra * (0.55 + 0.45 * sin(_t * 0.6 + i * 1.9))
+		var top := Color(c1.r, c1.g, c1.b, a)
+		var bot := Color(c1.r, c1.g, c1.b, 0.0)
+		draw_polygon(PackedVector2Array([Vector2(x, 0), Vector2(x + wd * 0.5, 0), Vector2(x + wd * 1.6 - slant, h), Vector2(x - wd * 0.6 - slant, h)]),
+			PackedColorArray([top, top, bot, bot]))
