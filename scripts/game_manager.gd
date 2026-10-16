@@ -4,13 +4,15 @@
 extends Node2D
 
 const FighterData := preload("res://scripts/fighter_data.gd")
+const WorldBuilder := preload("res://scripts/world_builder.gd")
 
 const ROUNDS_TO_WIN: int = 2
 const SPAWN_POINTS: Array[Vector2] = [
 	Vector2(-300.0, 70.0),
 	Vector2( 300.0, 70.0),
 ]
-const FLOOR_HALF_W: float = 1500.0
+const FLOOR_HALF_W: float = 1800.0
+const MIN_FIGHTER_GAP: float = 44.0
 const CAMERA_FLOOR_Y: float = 130.0
 
 var local_mode: bool = true
@@ -30,6 +32,7 @@ var _shake: float = 0.0
 @onready var _camera: Camera2D            = $Camera2D
 
 var _hud: Node = null
+var _world: Node2D = null
 var _overlay: Node = null
 
 
@@ -60,6 +63,41 @@ func _process(delta: float) -> void:
 	_update_camera(delta)
 
 
+func _physics_process(_delta: float) -> void:
+	if local_mode or multiplayer.is_server():
+		_separate_fighters()
+
+
+## Fighters have no body-vs-body collision (so nobody can stand on a head);
+## instead anyone overlapping the other's body is nudged sideways out of it.
+func _separate_fighters() -> void:
+	if _players.size() < 2:
+		return
+	var a = _players[0]
+	var b = _players[1]
+	if not is_instance_valid(a) or not is_instance_valid(b):
+		return
+	var dx: float = b.position.x - a.position.x
+	if absf(b.position.y - a.position.y) >= 112.0 or absf(dx) >= MIN_FIGHTER_GAP:
+		return
+	var dir := signf(dx)
+	if dir == 0.0:
+		dir = 1.0
+	var push := (MIN_FIGHTER_GAP - absf(dx)) * 0.5
+	var limit := 1000.0
+	var ax: float = a.position.x - dir * push
+	var bx: float = b.position.x + dir * push
+	# Pinned against a wall: the other fighter takes the whole shove.
+	if absf(ax) > limit:
+		bx += (absf(ax) - limit) * dir
+		ax = clampf(ax, -limit, limit)
+	if absf(bx) > limit:
+		ax -= (absf(bx) - limit) * dir
+		bx = clampf(bx, -limit, limit)
+	a.position.x = ax
+	b.position.x = bx
+
+
 # ── Camera ──────────────────────────────────────────────────────────────────
 
 func _update_camera(delta: float) -> void:
@@ -79,6 +117,8 @@ func _update_camera(delta: float) -> void:
 	var tx := clampf((a.x + b.x) * 0.5, -limit, limit)
 	var ty := CAMERA_FLOOR_Y - vp.y / z * 0.27
 	_camera.position = _camera.position.lerp(Vector2(tx, ty), clampf(6.0 * delta, 0.0, 1.0))
+	if _world:
+		_world.update_parallax(_camera.position.x)
 
 	_shake = move_toward(_shake, 0.0, 60.0 * delta)
 	_camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
@@ -86,6 +126,11 @@ func _update_camera(delta: float) -> void:
 
 func shake(amount: float) -> void:
 	_shake = maxf(_shake, amount)
+
+
+func show_combo(player_index: int, hits: int) -> void:
+	if _hud:
+		_hud.show_combo(player_index, hits)
 
 
 ## kind: 0 = blocked, 1 = hit, 2 = heavy hit.  dir is the defender's facing (sparks spray the other way).
@@ -117,72 +162,20 @@ func hit_effect(pos: Vector2, kind: int, dir: int) -> void:
 # ── Scene dressing ──────────────────────────────────────────────────────────
 
 func _setup_background() -> void:
-	# Screen-fixed dusk sky behind everything.
-	var sky_layer := CanvasLayer.new()
-	sky_layer.layer = -110
-	add_child(sky_layer)
-	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
-	grad.colors = PackedColorArray([Color(0.07, 0.06, 0.2), Color(0.45, 0.2, 0.4), Color(0.98, 0.55, 0.3)])
-	var gtex := GradientTexture2D.new()
-	gtex.gradient = grad
-	gtex.fill_from = Vector2(0, 0)
-	gtex.fill_to = Vector2(0, 1)
-	var sky := TextureRect.new()
-	sky.texture = gtex
-	sky.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	sky.stretch_mode = TextureRect.STRETCH_SCALE
-	sky.set_anchors_preset(Control.PRESET_FULL_RECT)
-	sky_layer.add_child(sky)
-	var moon := Polygon2D.new()
-	var pts := PackedVector2Array()
-	for i in range(40):
-		pts.append(Vector2(cos(TAU * i / 40.0), sin(TAU * i / 40.0)) * 60.0)
-	moon.polygon = pts
-	moon.color = Color(1.0, 0.93, 0.8, 0.9)
-	moon.position = Vector2(960, 190)
-	sky_layer.add_child(moon)
-
-	# Two mountain ridges that scroll slower than the fighters.
-	var parallax := ParallaxBackground.new()
-	add_child(parallax)
-	_add_ridge(parallax, 0.18, Color(0.32, 0.18, 0.4),  260.0, 0.0057, 1.3)
-	_add_ridge(parallax, 0.38, Color(0.17, 0.1, 0.25), 150.0, 0.011, 4.1)
-
-
-func _add_ridge(parent: Node, scroll: float, color: Color, height: float, freq: float, seed_off: float) -> void:
-	var layer := ParallaxLayer.new()
-	layer.motion_scale = Vector2(scroll, 1.0)
-	var poly := Polygon2D.new()
-	var pts := PackedVector2Array()
-	for x in range(-4000, 4001, 40):
-		var n := sin(x * freq + seed_off) * 0.5 + sin(x * freq * 2.7 + seed_off * 2.0) * 0.3 + sin(x * freq * 6.1) * 0.12
-		pts.append(Vector2(x, 140.0 - height * (0.55 + 0.45 * n)))
-	pts.append(Vector2(4000, 400))
-	pts.append(Vector2(-4000, 400))
-	poly.polygon = pts
-	poly.color = color
-	layer.add_child(poly)
-	parent.add_child(layer)
+	var root := get_tree().root
+	var stage: int = root.get_meta("stage") if root.has_meta("stage") else randi() % WorldBuilder.stage_count()
+	_world = WorldBuilder.new()
+	add_child(_world)
+	_world.build(stage, get_viewport_rect().size)
 
 
 func _setup_platform() -> void:
+	# The scene's StaticBody2D keeps the collision; the WorldBuilder draws the floor art.
 	var floor_node := get_node_or_null("Floor")
-	if not floor_node:
-		return
-	var old := floor_node.get_node_or_null("ColorRect")
-	if old:
-		old.queue_free()
-	if not floor_node.has_node("PlatformTex"):
-		var pt := TextureRect.new()
-		pt.name           = "PlatformTex"
-		pt.texture        = load("res://assets/platform.svg")
-		pt.stretch_mode   = TextureRect.STRETCH_TILE
-		pt.size           = Vector2(3000, 40)
-		pt.position       = Vector2(-1500, -20)
-		pt.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
-		pt.modulate       = Color(0.72, 0.62, 0.85)  # blend the grass into the dusk palette
-		floor_node.add_child(pt)
+	if floor_node:
+		var old := floor_node.get_node_or_null("ColorRect")
+		if old:
+			old.queue_free()
 
 
 func _setup_hud() -> void:
@@ -225,6 +218,7 @@ func _spawn_local_players() -> void:
 
 	var f1 := FighterData.get_fighter(picks[0])
 	var f2 := FighterData.get_fighter(picks[1])
+	_hud.set_portraits(picks[0], picks[1])
 	_hud.set_fighters(f1["name"], f1["color"], ("CPU " if vs_cpu else "") + f2["name"], f2["color"])
 	print("[GameManager] Local players spawned: %s vs %s%s" % [picks[0], picks[1], " (CPU)" if vs_cpu else ""])
 

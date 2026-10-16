@@ -271,3 +271,20 @@ chmod +x cloud-run/deploy_cloudrun.sh
 1. **WebSocket Termination & Session Affinity**: Cloud Run routes requests per-connection. For multiplayer rooms, clients joining the same room must reach the same instance OR rely on an external session affinity router (NGINX `ip_hash` or Cloud Run session affinity).
 2. **WebSocket Idle Timeout**: Cloud Run automatically closes WebSocket connections with no data flow after 5 minutes. The 20s keepalive ping in `scripts/network_manager.gd` is essential and must not be removed.
 3. **Dedicated Server Mode**: `NetworkManager._is_headless()` checks `DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")`. Keep this check intact when exporting Linux server binaries.
+
+
+---
+
+## 7. Local-game architecture notes (menu, world, UI)
+
+- **Boot flow**: `scenes/loading.tscn` (threaded preload of fighter sheets) -> `scenes/main.tscn` (animated menu) -> `scenes/character_select.tscn` (fighters + stage, `TAB` cycles stage) -> `scenes/game.tscn`. All scene changes go through the `Transition` autoload (`scripts/transition.gd`, fade in/out).
+- **World art is procedural**: `scripts/world_builder.gd` builds layered parallax stages (3 themes in `STAGES`) from `scripts/scenery.gd` shapes (pagoda, torii, pine, lantern, bamboo, sakura, floor...). Add a stage by adding a dictionary to `STAGES`.
+- **UI look**: `scripts/ui_style.gd` holds palette, fonts and styled button/label builders; the HUD uses `scripts/hud_bar.gd` slanted bars.
+- **No fighter-vs-fighter body collision**: players use collision layer 4 / mask 1 (floor only); `game_manager._separate_fighters()` nudges overlapping fighters apart so nobody can stand on a head.
+- **Match settings live in root metadata** (`local_mode`, `vs_cpu`, `p1_char`, `p2_char`, `stage`).
+
+### Cloud multiplayer readiness (not implemented yet)
+- The Online button + matchmaking call and the network spawn path in `game_manager.gd` are preserved untouched.
+- Fighter separation and hit resolution run only where `_server_process` runs (local or server), so they stay server-authoritative.
+- When online play is built, the chosen `char_id` and `stage` must be carried in the room metadata and replicated (currently network players default to a roster entry by `player_index`, and the stage is random).
+- `player_controller.send_input` now takes a 4th `block` argument.

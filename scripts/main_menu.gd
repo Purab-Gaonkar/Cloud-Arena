@@ -1,233 +1,369 @@
-## main_menu.gd - Cinematic main menu for CloudArena.
+## main_menu.gd - Animated main menu for CloudArena.
+## Shows a living arena (parallax world + sparring fighters) behind a stylised button column.
 extends Control
 
+const UiStyle      := preload("res://scripts/ui_style.gd")
+const FighterData  := preload("res://scripts/fighter_data.gd")
+const WorldBuilder := preload("res://scripts/world_builder.gd")
+
+const SELECT_SCENE: String = "res://scenes/character_select.tscn"
+const FIGHTER_SCALE: float = 2.2
+
+var _world: Node2D
+var _t: float = 0.0
+var _showcase: Array = []   # [{"sprite": AnimatedSprite2D, "timer": float}]
+
+var _buttons: Array[Button] = []
+var _modal_online: Control
+var _modal_controls: Control
 var _status_label: Label
-var _ip_field:     LineEdit
-var _btn_local:    Button
-var _btn_cpu:      Button
+var _ip_field: LineEdit
 var _btn_matchmake: Button
 var _http_request: HTTPRequest
 
 
 func _ready() -> void:
-	_build_ui()
+	# Dedicated server builds skip the UI and go straight to hosting.
 	if DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server"):
 		get_tree().root.set_meta("local_mode", false)
 		get_tree().change_scene_to_file("res://scenes/game.tscn")
+		return
+	_build_world()
+	_build_ui()
+	_play_intro()
 
+
+func _process(delta: float) -> void:
+	_t += delta
+	if _world:
+		_world.update_parallax(sin(_t * 0.12) * 380.0)
+	for s in _showcase:
+		s["timer"] -= delta
+		if s["timer"] <= 0.0:
+			s["timer"] = randf_range(1.4, 3.6)
+			var sprite: AnimatedSprite2D = s["sprite"]
+			var moves := ["attack_1", "attack_2", "attack_3", "block", "jump", "attack_1"]
+			sprite.play(moves[randi() % moves.size()])
+
+
+func _input(event: InputEvent) -> void:
+	if _modal_online and event.is_action_pressed("ui_cancel") and (_modal_online.visible or _modal_controls.visible):
+		_close_modals()
+		get_viewport().set_input_as_handled()
+
+
+# ── World ───────────────────────────────────────────────────────────────────
+
+func _build_world() -> void:
+	_world = WorldBuilder.new()
+	_world.position = Vector2(640, 640.0 - WorldBuilder.GROUND_Y)
+	add_child(_world)
+	_world.build(randi() % WorldBuilder.stage_count())
+
+	# [fighter, world x, faces left]
+	var cast := [["Samurai", 170.0, false], ["Shinobi", 360.0, true], ["Fighter", 520.0, true]]
+	for c in cast:
+		var sprite := AnimatedSprite2D.new()
+		sprite.sprite_frames = FighterData.build_frames(c[0])
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		sprite.scale = Vector2(FIGHTER_SCALE, FIGHTER_SCALE)
+		sprite.flip_h = c[2]
+		sprite.position = Vector2(c[1], WorldBuilder.GROUND_Y - 63.5 * FIGHTER_SCALE)
+		sprite.play("idle")
+		sprite.animation_finished.connect(_on_showcase_finished.bind(sprite))
+		_world.add_child(sprite)
+		_showcase.append({"sprite": sprite, "timer": randf_range(0.5, 2.5)})
+
+
+func _on_showcase_finished(sprite: AnimatedSprite2D) -> void:
+	if sprite.animation != "idle":
+		sprite.play("idle")
+
+
+# ── UI ──────────────────────────────────────────────────────────────────────
 
 func _build_ui() -> void:
 	_http_request = HTTPRequest.new()
 	add_child(_http_request)
 	_http_request.request_completed.connect(_on_matchmake_completed)
 
-	var bg := ColorRect.new()
-	bg.color = Color(0.04, 0.04, 0.07, 1.0)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
+	# Left-side shade so the logo and buttons stay readable over any stage.
+	var grad := Gradient.new()
+	grad.colors = PackedColorArray([Color(0.02, 0.01, 0.06, 0.82), Color(0.02, 0.01, 0.06, 0.0)])
+	grad.offsets = PackedFloat32Array([0.0, 1.0])
+	var gtex := GradientTexture2D.new()
+	gtex.gradient = grad
+	gtex.fill_from = Vector2(0, 0)
+	gtex.fill_to = Vector2(0.55, 0)
+	var shade := TextureRect.new()
+	shade.texture = gtex
+	shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	shade.stretch_mode = TextureRect.STRETCH_SCALE
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(shade)
 
-	var grad := ColorRect.new()
-	grad.set_anchors_preset(Control.PRESET_FULL_RECT)
-	grad.color = Color(0.06, 0.0, 0.14, 0.45)
-	add_child(grad)
+	var sub := UiStyle.label("CLOUD-POWERED ARENA FIGHTER", 20, UiStyle.GOLD, true, 6)
+	sub.position = Vector2(86, 42)
+	sub.size = Vector2(500, 28)
+	sub.name = "Sub"
+	add_child(sub)
 
-	var center := VBoxContainer.new()
-	center.set_anchors_preset(Control.PRESET_CENTER)
-	center.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	center.grow_vertical   = Control.GROW_DIRECTION_BOTH
-	center.custom_minimum_size = Vector2(440, 0)
-	center.alignment = BoxContainer.ALIGNMENT_CENTER
-	center.add_theme_constant_override("separation", 16)
-	add_child(center)
+	var t1 := UiStyle.label("CLOUD", 118, UiStyle.GOLD, true, 18)
+	t1.position = Vector2(78, 62)
+	t1.size = Vector2(500, 130)
+	t1.name = "Title1"
+	var t2 := UiStyle.label("ARENA", 118, Color.WHITE, true, 18)
+	t2.position = Vector2(78, 170)
+	t2.size = Vector2(500, 130)
+	t2.name = "Title2"
+	for t in [t1, t2]:
+		t.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+		t.add_theme_constant_override("shadow_offset_x", 7)
+		t.add_theme_constant_override("shadow_offset_y", 7)
+		add_child(t)
 
-	var sub := Label.new()
-	sub.text = "CLOUD-POWERED FIGHTING GAME"
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.add_theme_font_size_override("font_size", 12)
-	sub.add_theme_color_override("font_color", Color(0.6, 0.4, 1.0, 0.85))
-	center.add_child(sub)
+	var items := [
+		["VS  CPU",   Color(0.95, 0.4, 0.15), _on_cpu_pressed],
+		["LOCAL  2P", Color(0.55, 0.3, 1.0),  _on_local_pressed],
+		["ONLINE",    Color(0.15, 0.7, 0.55), _on_online_pressed],
+		["CONTROLS",  Color(0.25, 0.55, 0.95), _on_controls_pressed],
+		["QUIT",      Color(0.75, 0.2, 0.3),  _on_quit_pressed],
+	]
+	for i in range(items.size()):
+		var btn := UiStyle.button(items[i][0], items[i][1])
+		btn.position = Vector2(86, 318 + i * 62)
+		btn.size = Vector2(380, 52)
+		btn.pressed.connect(items[i][2])
+		add_child(btn)
+		_buttons.append(btn)
 
-	var title := Label.new()
-	title.text = "CLOUD  ARENA"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 56)
-	title.add_theme_color_override("font_color", Color.WHITE)
-	center.add_child(title)
-
-	var tw := create_tween().set_loops()
-	tw.tween_property(title, "scale", Vector2(1.04, 1.04), 1.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	tw.tween_property(title, "scale", Vector2(1.0,  1.0),  1.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-
-	var div := ColorRect.new()
-	div.color = Color(0.55, 0.25, 1.0, 0.6)
-	div.custom_minimum_size = Vector2(0, 2)
-	center.add_child(div)
-
-	_add_spacer(center, 10)
-
-	_btn_cpu = _make_button("VS CPU  (1 Player)", Color(0.9, 0.35, 0.15))
-	_btn_cpu.pressed.connect(_on_cpu_pressed)
-	center.add_child(_btn_cpu)
-
-	_btn_local = _make_button("LOCAL PLAY  (2 Players, Same PC)", Color(0.45, 0.1, 0.9))
-	_btn_local.pressed.connect(_on_local_pressed)
-	center.add_child(_btn_local)
-
-	var hint := Label.new()
-	hint.text = "P1: A/D move, W jump, J attack (x3 combo), S block
-P2: Arrows move/jump, / or Numpad 0 attack, Down block"
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", Color(0.65, 0.65, 0.75))
-	center.add_child(hint)
-
-	_add_spacer(center, 8)
-
-	var or_lbl := Label.new()
-	or_lbl.text = "--- ONLINE MULTIPLAYER ---"
-	or_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	or_lbl.add_theme_font_size_override("font_size", 11)
-	or_lbl.add_theme_color_override("font_color", Color(0.45, 0.45, 0.55))
-	center.add_child(or_lbl)
-
-	_ip_field = LineEdit.new()
-	_ip_field.placeholder_text = "Matchmaker API URL"
-	_ip_field.text = "http://127.0.0.1:8000"
-	_ip_field.custom_minimum_size = Vector2(0, 44)
-	_ip_field.add_theme_font_size_override("font_size", 15)
-	center.add_child(_ip_field)
-
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 12)
-	center.add_child(row)
-
-	_btn_matchmake = _make_button("MATCHMAKE", Color(0.1, 0.55, 0.4))
-	_btn_matchmake.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_btn_matchmake.pressed.connect(_on_matchmake_pressed)
-	row.add_child(_btn_matchmake)
-
-	_status_label = Label.new()
-	_status_label.text = ""
-	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_status_label.add_theme_font_size_override("font_size", 13)
-	_status_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2))
-	center.add_child(_status_label)
-
-	var ver := Label.new()
-	ver.text = "v0.1.0  |  Powered by GCP"
-	ver.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	ver.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	ver.grow_vertical   = Control.GROW_DIRECTION_BEGIN
-	ver.add_theme_font_size_override("font_size", 10)
-	ver.add_theme_color_override("font_color", Color(0.35, 0.35, 0.45))
+	var ver := UiStyle.label("v0.2.0   |   Fighter sprites: Craftpix", 13, UiStyle.MUTED, false, 4)
+	ver.position = Vector2(86, 686)
+	ver.size = Vector2(500, 20)
 	add_child(ver)
 
-
-func _add_spacer(parent: Control, h: int) -> void:
-	var s := Control.new()
-	s.custom_minimum_size = Vector2(0, h)
-	parent.add_child(s)
+	_build_online_modal()
+	_build_controls_modal()
 
 
-func _make_button(txt: String, accent: Color) -> Button:
-	var btn := Button.new()
-	btn.text = txt
-	btn.custom_minimum_size = Vector2(0, 52)
-	btn.add_theme_font_size_override("font_size", 16)
+func _play_intro() -> void:
+	var targets: Array[Control] = [get_node("Sub"), get_node("Title1"), get_node("Title2")]
+	targets.append_array(_buttons)
+	for i in range(targets.size()):
+		var n := targets[i]
+		var end_x := n.position.x
+		n.position.x = end_x - 360.0
+		n.modulate.a = 0.0
+		var tw := create_tween().set_parallel(true)
+		tw.tween_property(n, "position:x", end_x, 0.6).set_delay(0.12 * i).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(n, "modulate:a", 1.0, 0.35).set_delay(0.12 * i)
+	await get_tree().create_timer(0.12 * targets.size() + 0.7).timeout
+	if not (_modal_online.visible or _modal_controls.visible):
+		_buttons[0].grab_focus()
 
-	var base_col := Color(accent.r * 0.28, accent.g * 0.28, accent.b * 0.28, 0.95)
 
-	var normal := StyleBoxFlat.new()
-	normal.bg_color = base_col
-	normal.border_color = accent
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		normal.set_border_width(side, 2)
-	for c in [CORNER_TOP_LEFT, CORNER_TOP_RIGHT, CORNER_BOTTOM_LEFT, CORNER_BOTTOM_RIGHT]:
-		normal.set_corner_radius(c, 8)
-	btn.add_theme_stylebox_override("normal", normal)
+func _make_modal(title: String, size_v: Vector2) -> Control:
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.visible = false
+	add_child(root)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(dim)
 
-	var hover := StyleBoxFlat.new()
-	hover.bg_color = Color(accent.r * 0.5, accent.g * 0.5, accent.b * 0.5, 1.0)
-	hover.border_color = Color(accent.r + 0.15, accent.g + 0.15, accent.b + 0.15).clamp()
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		hover.set_border_width(side, 2)
-	for c in [CORNER_TOP_LEFT, CORNER_TOP_RIGHT, CORNER_BOTTOM_LEFT, CORNER_BOTTOM_RIGHT]:
-		hover.set_corner_radius(c, 8)
-	btn.add_theme_stylebox_override("hover", hover)
+	var panel := Panel.new()
+	panel.name = "Panel"
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.position = Vector2(640, 360) - size_v * 0.5
+	panel.size = size_v
+	panel.pivot_offset = size_v * 0.5
+	var st := UiStyle.box(Color(0.07, 0.05, 0.13, 0.97), UiStyle.GOLD, 3, 10)
+	st.shadow_size = 24
+	st.shadow_color = Color(0, 0, 0, 0.5)
+	panel.add_theme_stylebox_override("panel", st)
+	root.add_child(panel)
 
-	var pressed_sty := StyleBoxFlat.new()
-	pressed_sty.bg_color = accent
-	for c in [CORNER_TOP_LEFT, CORNER_TOP_RIGHT, CORNER_BOTTOM_LEFT, CORNER_BOTTOM_RIGHT]:
-		pressed_sty.set_corner_radius(c, 8)
-	btn.add_theme_stylebox_override("pressed", pressed_sty)
+	var head := UiStyle.label(title, 38, UiStyle.GOLD, true, 8)
+	head.position = Vector2(30, 18)
+	head.size = Vector2(size_v.x - 60, 46)
+	panel.add_child(head)
+	var line := ColorRect.new()
+	line.color = UiStyle.GOLD_DARK
+	line.position = Vector2(30, 68)
+	line.size = Vector2(size_v.x - 60, 3)
+	panel.add_child(line)
+	return root
 
-	return btn
 
+func _show_modal(m: Control) -> void:
+	m.visible = true
+	var panel: Control = m.get_node("Panel")
+	panel.scale = Vector2(0.9, 0.9)
+	panel.modulate.a = 0.0
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(panel, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(panel, "modulate:a", 1.0, 0.15)
+
+
+func _close_modals() -> void:
+	_modal_online.visible = false
+	_modal_controls.visible = false
+	for b in _buttons:
+		b.disabled = false
+	_buttons[0].grab_focus()
+
+
+func _build_online_modal() -> void:
+	_modal_online = _make_modal("ONLINE MATCH", Vector2(620, 340))
+	var panel: Control = _modal_online.get_node("Panel")
+
+	var hint := UiStyle.label("Matchmaker API address", 15, UiStyle.MUTED, false)
+	hint.position = Vector2(30, 90)
+	panel.add_child(hint)
+
+	_ip_field = LineEdit.new()
+	_ip_field.text = "http://127.0.0.1:8000"
+	_ip_field.position = Vector2(30, 116)
+	_ip_field.size = Vector2(560, 46)
+	_ip_field.add_theme_font_override("font", UiStyle.body_font())
+	_ip_field.add_theme_font_size_override("font_size", 18)
+	_ip_field.add_theme_stylebox_override("normal", UiStyle.box(Color(0.03, 0.02, 0.07), UiStyle.GOLD_DARK, 2, 6))
+	_ip_field.add_theme_stylebox_override("focus", UiStyle.box(Color(0.03, 0.02, 0.07), UiStyle.GOLD, 2, 6))
+	panel.add_child(_ip_field)
+
+	_btn_matchmake = UiStyle.button("FIND MATCH", Color(0.15, 0.7, 0.55))
+	_btn_matchmake.position = Vector2(30, 184)
+	_btn_matchmake.size = Vector2(270, 52)
+	_btn_matchmake.pressed.connect(_on_matchmake_pressed)
+	panel.add_child(_btn_matchmake)
+
+	var back := UiStyle.button("BACK", Color(0.6, 0.6, 0.75))
+	back.position = Vector2(320, 184)
+	back.size = Vector2(270, 52)
+	back.pressed.connect(_close_modals)
+	panel.add_child(back)
+
+	_status_label = UiStyle.label("", 17, UiStyle.GOLD, false)
+	_status_label.position = Vector2(30, 256)
+	_status_label.size = Vector2(560, 60)
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel.add_child(_status_label)
+
+
+func _build_controls_modal() -> void:
+	_modal_controls = _make_modal("CONTROLS", Vector2(760, 420))
+	var panel: Control = _modal_controls.get_node("Panel")
+	var rows := [
+		["", "PLAYER 1", "PLAYER 2"],
+		["Move", "A / D", "Left / Right"],
+		["Jump", "W  or  Space", "Up"],
+		["Attack  (tap x3 = combo)", "J  or  Left Click", "/  or  Numpad 0"],
+		["Block  (face your enemy)", "S  or  K", "Down  or  ."],
+		["Pause", "Esc", "Esc"],
+	]
+	var xs := [30.0, 300.0, 530.0]
+	for r in range(rows.size()):
+		for c in range(3):
+			var head: bool = (r == 0)
+			var col: Color = UiStyle.TEXT if c > 0 else UiStyle.MUTED
+			if head and c == 1:
+				col = UiStyle.P1
+			elif head and c == 2:
+				col = UiStyle.P2
+			var l := UiStyle.label(rows[r][c], 26 if head else 20, col, head, 5 if head else 0)
+			if not head:
+				l.add_theme_font_override("font", UiStyle.body_font())
+			l.position = Vector2(xs[c], 90 + r * 44)
+			panel.add_child(l)
+	var back := UiStyle.button("BACK", Color(0.6, 0.6, 0.75))
+	back.position = Vector2(30, 360)
+	back.size = Vector2(240, 46)
+	back.pressed.connect(_close_modals)
+	panel.add_child(back)
+
+
+# ── Actions ─────────────────────────────────────────────────────────────────
 
 func _on_local_pressed() -> void:
 	get_tree().root.set_meta("local_mode", true)
 	get_tree().root.set_meta("vs_cpu", false)
-	get_tree().change_scene_to_file("res://scenes/character_select.tscn")
+	Transition.go(SELECT_SCENE)
 
 
 func _on_cpu_pressed() -> void:
 	get_tree().root.set_meta("local_mode", true)
 	get_tree().root.set_meta("vs_cpu", true)
-	get_tree().change_scene_to_file("res://scenes/character_select.tscn")
+	Transition.go(SELECT_SCENE)
 
+
+func _on_online_pressed() -> void:
+	_status_label.text = ""
+	for b in _buttons:
+		b.disabled = true
+	_show_modal(_modal_online)
+	_ip_field.grab_focus()
+
+
+func _on_controls_pressed() -> void:
+	for b in _buttons:
+		b.disabled = true
+	_show_modal(_modal_controls)
+
+
+func _on_quit_pressed() -> void:
+	get_tree().quit()
+
+
+# ── Online matchmaking (unchanged behaviour; backend work comes later) ──────
 
 func _on_matchmake_pressed() -> void:
-	_set_all_disabled(true)
+	_btn_matchmake.disabled = true
 	var url := _ip_field.text.strip_edges()
 	if url.is_empty():
 		url = "http://127.0.0.1:8000"
-	
+
 	_status_label.text = "Requesting matchmaking..."
-	
+
 	var headers = ["Content-Type: application/json"]
 	var body = JSON.stringify({"player_name": "Player_" + str(randi() % 1000)})
-	
+
 	var err = _http_request.request(url + "/match/join", headers, HTTPClient.METHOD_POST, body)
 	if err != OK:
 		_status_label.text = "Failed to send matchmaking request."
-		_set_all_disabled(false)
+		_btn_matchmake.disabled = false
 
 
-func _on_matchmake_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_matchmake_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	if response_code != 200:
 		_status_label.text = "Matchmaking failed: HTTP " + str(response_code)
-		_set_all_disabled(false)
+		_btn_matchmake.disabled = false
 		return
-		
+
 	var json = JSON.parse_string(body.get_string_from_utf8())
 	if typeof(json) != TYPE_DICTIONARY or not json.has("ws_url"):
 		_status_label.text = "Invalid matchmaking response."
-		_set_all_disabled(false)
+		_btn_matchmake.disabled = false
 		return
-		
+
 	var ws_url: String = json["ws_url"]
 	_status_label.text = "Joining " + ws_url + "..."
-	
+
 	get_tree().root.set_meta("local_mode", false)
 	var net := _get_network_manager()
 	if not net:
 		_status_label.text = "ERROR: NetworkManager not found."
-		_set_all_disabled(false)
+		_btn_matchmake.disabled = false
 		return
-		
+
 	var err: Error = net.join_game(ws_url)
 	if err != OK:
 		_status_label.text = "Failed to join: %s" % error_string(err)
-		_set_all_disabled(false)
+		_btn_matchmake.disabled = false
 		return
-		
-	get_tree().change_scene_to_file("res://scenes/game.tscn")
 
-
-func _set_all_disabled(d: bool) -> void:
-	_btn_local.disabled = d
-	_btn_cpu.disabled = d
-	_btn_matchmake.disabled = d
+	Transition.go("res://scenes/game.tscn")
 
 
 func _get_network_manager() -> Node:

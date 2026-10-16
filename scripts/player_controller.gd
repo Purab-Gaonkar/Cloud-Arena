@@ -49,6 +49,7 @@ var _input_move_dir: float = 0.0
 var _input_jump:     bool  = false
 var _input_attack:   bool  = false
 var _input_block:    bool  = false
+var _combo_hits: int = 0
 var _opponent = null  # the other fighter (untyped so we can read its state)
 
 var _ai_mode:  String = "idle"
@@ -70,6 +71,10 @@ func _ready() -> void:
 		char_id = FighterData.ROSTER[player_index % FighterData.ROSTER.size()]["id"]
 	_fighter = FighterData.get_fighter(char_id)
 
+	# Fighters never collide with each other (the game manager nudges them apart),
+	# so nobody can stand on an opponent's head. They only collide with the floor.
+	collision_layer = 4
+	collision_mask  = 1
 	_setup_body()
 	_sprite.sprite_frames   = FighterData.build_frames(char_id)
 	_sprite.scale           = Vector2(SPRITE_SCALE, SPRITE_SCALE)
@@ -407,6 +412,10 @@ func receive_hit(attacker, damage: int, knockback: Vector2, stun: float, hitstop
 		_notify_scene("hit_effect", [contact, 0, facing_direction])
 		return
 
+	var chained: bool = current_state == State.HIT
+	attacker._combo_hits = attacker._combo_hits + 1 if chained else 1
+	if attacker._combo_hits >= 2:
+		_notify_scene("show_combo", [attacker.player_index, attacker._combo_hits])
 	health -= damage
 	_hitstop = hitstop
 	attacker._hitstop = hitstop
