@@ -4,10 +4,17 @@ extends Node
 
 const PATH: String = "user://settings.cfg"
 const LEVEL_NAMES: Array = ["EASY", "NORMAL", "HARD"]
+const ROUND_TIMES: Array = [99, 60, 30, 0]     # 0 = no time limit
 
 var cpu_level: int = 1
 var screen_shake: bool = true
 var fullscreen: bool = false
+var rounds_to_win: int = 2
+var round_time_index: int = 0
+var fg_blur: bool = true
+var seen_tips: bool = false
+var online_api: String = "http://127.0.0.1:8000"
+var player_name: String = ""
 
 
 func _ready() -> void:
@@ -17,6 +24,12 @@ func _ready() -> void:
 		cpu_level = clampi(int(cfg.get_value("game", "cpu_level", cpu_level)), 0, 2)
 		screen_shake = bool(cfg.get_value("game", "screen_shake", screen_shake))
 		fullscreen = bool(cfg.get_value("game", "fullscreen", fullscreen))
+		rounds_to_win = clampi(int(cfg.get_value("game", "rounds_to_win", rounds_to_win)), 1, 3)
+		round_time_index = clampi(int(cfg.get_value("game", "round_time_index", round_time_index)), 0, ROUND_TIMES.size() - 1)
+		fg_blur = bool(cfg.get_value("game", "fg_blur", fg_blur))
+		seen_tips = bool(cfg.get_value("game", "seen_tips", seen_tips))
+		online_api = str(cfg.get_value("online", "api", online_api))
+		player_name = str(cfg.get_value("online", "name", player_name))
 	_apply_fullscreen()
 
 
@@ -27,6 +40,36 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func cycle_cpu_level() -> void:
 	cpu_level = (cpu_level + 1) % LEVEL_NAMES.size()
+	_save()
+
+
+func cycle_rounds() -> void:
+	rounds_to_win = rounds_to_win % 3 + 1
+	_save()
+
+
+func cycle_round_time() -> void:
+	round_time_index = (round_time_index + 1) % ROUND_TIMES.size()
+	_save()
+
+
+func round_seconds() -> int:
+	return ROUND_TIMES[round_time_index]
+
+
+func set_online(api: String, name: String) -> void:
+	online_api = api.strip_edges()
+	player_name = name.strip_edges()
+	_save()
+
+
+func mark_tips_seen() -> void:
+	seen_tips = true
+	_save()
+
+
+func set_fg_blur(on: bool) -> void:
+	fg_blur = on
 	_save()
 
 
@@ -53,4 +96,10 @@ func _save() -> void:
 	cfg.set_value("game", "cpu_level", cpu_level)
 	cfg.set_value("game", "screen_shake", screen_shake)
 	cfg.set_value("game", "fullscreen", fullscreen)
+	cfg.set_value("game", "rounds_to_win", rounds_to_win)
+	cfg.set_value("game", "round_time_index", round_time_index)
+	cfg.set_value("game", "fg_blur", fg_blur)
+	cfg.set_value("game", "seen_tips", seen_tips)
+	cfg.set_value("online", "api", online_api)
+	cfg.set_value("online", "name", player_name)
 	cfg.save(PATH)

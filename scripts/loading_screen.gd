@@ -33,7 +33,7 @@ var _bar_y: float = 600.0
 func _ready() -> void:
 	# Dedicated servers skip straight to the menu script, which auto-hosts.
 	if DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server"):
-		get_tree().change_scene_to_file(NEXT_SCENE)
+		get_tree().change_scene_to_file.call_deferred(NEXT_SCENE)
 		return
 	AudioManager.play_music("menu", 1.5)
 	_build_ui()
@@ -62,13 +62,6 @@ func _build_ui() -> void:
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(shade)
 
-	var sub := UiStyle.label("THE  CLOUD-POWERED  ARENA  FIGHTER", 22, UiStyle.GOLD, true, 6)
-	sub.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	sub.position = Vector2(-300, 120)
-	sub.size = Vector2(600, 30)
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	add_child(sub)
-
 	var title := UiStyle.label("CLOUD ARENA", 132, Color.WHITE, true, 20)
 	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	title.position = Vector2(-420, 150)
@@ -79,13 +72,11 @@ func _build_ui() -> void:
 	title.add_theme_constant_override("shadow_offset_y", 8)
 	title.pivot_offset = Vector2(420, 75)
 	add_child(title)
-	for n in [sub, title]:
-		n.modulate.a = 0.0
+	title.modulate.a = 0.0
 	title.scale = Vector2(1.25, 1.25)
 	var intro := create_tween().set_parallel(true)
 	intro.tween_property(title, "modulate:a", 1.0, 0.7)
 	intro.tween_property(title, "scale", Vector2.ONE, 0.9).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	intro.tween_property(sub, "modulate:a", 1.0, 0.9).set_delay(0.5)
 
 	# Progress bar
 	var bar := Panel.new()

@@ -23,17 +23,16 @@ func _ready() -> void:
 
 func _build() -> void:
 	for i in range(2):
-		var tab := UiStyle.button("PLAYER %d" % (i + 1), UiStyle.P1 if i == 0 else UiStyle.P2, 44.0)
-		tab.add_theme_font_size_override("font_size", 22)
-		tab.position = Vector2(560 + i * 190, 16)
-		tab.size = Vector2(180, 44)
+		var tab := UiStyle.minimal_button("Player %d" % (i + 1), 24)
+		tab.position = Vector2(400 + i * 120, 8)
+		tab.size = Vector2(110, 40)
 		tab.pressed.connect(_select_player.bind(i))
 		add_child(tab)
 		_tab_btns.append(tab)
 
-	var heads := [["ACTION", 30.0], ["KEYBOARD", 330.0], ["GAMEPAD", 640.0]]
+	var heads := [["Action", 30.0], ["Keyboard", 330.0], ["Gamepad", 640.0]]
 	for h in heads:
-		var l := UiStyle.label(h[0], 20, UiStyle.MUTED, true)
+		var l := UiStyle.serif_label(h[0], 17, Color(0.5, 0.54, 0.68))
 		l.position = Vector2(h[1], 84)
 		add_child(l)
 
@@ -41,7 +40,7 @@ func _build() -> void:
 	for r in range(rows.size()):
 		var id: String = rows[r][0]
 		var y := 116.0 + r * 50.0
-		var lbl := UiStyle.label(rows[r][1], 24, UiStyle.TEXT, true, 5)
+		var lbl := UiStyle.serif_label(rows[r][1], 24, UiStyle.ASH)
 		lbl.position = Vector2(30, y + 6)
 		add_child(lbl)
 
@@ -55,23 +54,21 @@ func _build() -> void:
 		add_child(pb)
 		_pad_btns[id] = pb
 
-	var reset := UiStyle.button("RESET DEFAULTS", Color(0.85, 0.5, 0.2), 46.0)
-	reset.add_theme_font_size_override("font_size", 22)
+	var reset := UiStyle.minimal_button("Restore Defaults", 22)
 	reset.position = Vector2(30, 486)
-	reset.size = Vector2(280, 46)
+	reset.size = Vector2(240, 44)
 	reset.pressed.connect(func() -> void:
 		_capture = {}
 		InputConfig.reset_defaults())
 	add_child(reset)
 
-	var back := UiStyle.button("BACK", Color(0.6, 0.6, 0.75), 46.0)
-	back.add_theme_font_size_override("font_size", 22)
+	var back := UiStyle.minimal_button("Back", 22)
 	back.position = Vector2(330, 486)
-	back.size = Vector2(200, 46)
+	back.size = Vector2(120, 44)
 	back.pressed.connect(func() -> void: back_requested.emit())
 	add_child(back)
 
-	_info = UiStyle.label("", 15, UiStyle.MUTED, false)
+	_info = UiStyle.serif_label("", 15, Color(0.45, 0.49, 0.62))
 	_info.position = Vector2(30, 546)
 	_info.size = Vector2(940, 40)
 	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -79,10 +76,10 @@ func _build() -> void:
 
 
 func _slot_button(pos: Vector2, accent: Color) -> Button:
-	var b := UiStyle.button("", accent, 42.0)
-	b.add_theme_font_size_override("font_size", 20)
+	var b := UiStyle.minimal_button("", 21)
 	b.position = pos
 	b.size = Vector2(290, 42)
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	return b
 
 
@@ -100,7 +97,7 @@ func _begin_capture(id: String, kind: String) -> void:
 
 func _refresh() -> void:
 	for i in range(_tab_btns.size()):
-		_tab_btns[i].modulate = Color.WHITE if i == _player else Color(1, 1, 1, 0.45)
+		_tab_btns[i].modulate = Color.WHITE if i == _player else Color(1, 1, 1, 0.4)
 	for row in InputConfig.ACTIONS:
 		var id: String = row[0]
 		var waiting_key: bool = not _capture.is_empty() and _capture["id"] == id and _capture["kind"] == "key"

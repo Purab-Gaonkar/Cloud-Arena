@@ -66,6 +66,43 @@ const ANIMS: Array = [
 ]
 
 
+## Hue shifts for alternate colour palettes (index 0 = original art).
+const PALETTE_HUES: Array = [0.0, 0.33, 0.62, 0.85]
+
+static var _palette_shader: Shader
+static var _palette_cache: Dictionary = {}
+
+
+## Material that recolours a sprite by rotating its hue; null for the original palette.
+static func palette_material(index: int) -> ShaderMaterial:
+	index = posmod(index, PALETTE_HUES.size())
+	if index == 0:
+		return null
+	if _palette_cache.has(index):
+		return _palette_cache[index]
+	if _palette_shader == null:
+		_palette_shader = Shader.new()
+		_palette_shader.code = """
+shader_type canvas_item;
+uniform float hue = 0.0;
+const mat3 TO_YIQ = mat3(vec3(0.299, 0.596, 0.211), vec3(0.587, -0.274, -0.523), vec3(0.114, -0.322, 0.312));
+const mat3 FROM_YIQ = mat3(vec3(1.0, 1.0, 1.0), vec3(0.956, -0.272, -1.106), vec3(0.621, -0.647, 1.703));
+void fragment() {
+	vec4 tex = texture(TEXTURE, UV);
+	vec3 yiq = TO_YIQ * tex.rgb;
+	float a = hue * 6.28318;
+	mat2 r = mat2(vec2(cos(a), sin(a)), vec2(-sin(a), cos(a)));
+	yiq.yz = r * yiq.yz;
+	COLOR = vec4(FROM_YIQ * yiq, tex.a) * COLOR;
+}
+"""
+	var mat := ShaderMaterial.new()
+	mat.shader = _palette_shader
+	mat.set_shader_parameter("hue", PALETTE_HUES[index])
+	_palette_cache[index] = mat
+	return mat
+
+
 static func get_fighter(char_id: String) -> Dictionary:
 	for f in ROSTER:
 		if f["id"] == char_id:

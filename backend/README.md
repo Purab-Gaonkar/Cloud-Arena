@@ -1,170 +1,91 @@
-# CloudArena — Cloud Backend
+# CloudArena backend
 
-> Production-ready cloud backend for the CloudArena Godot fighting game.
-
-## Architecture
+Online play is **server-authoritative**: every match runs inside a headless Godot process (the same game
+code as the client), so combat rules exist in exactly one place.
 
 ```
-                ┌─────────────────────────────────┐
-                │     Clients (Godot Game)         │
-                └──────────────┬──────────────────┘
-                               │ HTTP / WebSocket
-                       ┌───────▼────────┐
-                       │     NGINX      │  ← Load Balancer
-                       │  (port 8080)   │    ip_hash sticky WS
-                       └──┬────────┬───┘    least_conn API
-                          │        │
-            ┌─────────────▼──┐  ┌──▼────────────────┐
-            │  Game Server 1 │  │  Matchmaking API 1 │
-            │  (WebSocket)   │  │  (FastAPI REST)    │
-            │  port 8765     │  │  port 8000         │
-            └────────┬───────┘  └─────────┬──────────┘
-                     │                    │
-            ┌────────▼──┐      ┌──────────▼──────────┐
-            │Game Server│      │  Matchmaking API 2  │
-            │    2      │      │                     │
-            └────────┬──┘      └─────────┬───────────┘
-                     │                   │
-                     └─────────┬─────────┘
-                           ┌───▼───┐
-                           │ Redis │  ← Shared state
-                           └───────┘
+ Godot client ──HTTP──▶ Matchmaking API (FastAPI) ──Redis──▶ Room manager (game host)
+      │                                                         │ spawns 1 process per match
+      └──────────WebSocket (wss://host/ws/<room>)──▶ relay ──▶ headless Godot server
 ```
 
-### Services
-
-| Service | Technology | Role |
+| Part | Where | Role |
 |---|---|---|
-| **game-server** | Python + websockets | Real-time WebSocket game logic, room management |
-| **matchmaking-api** | FastAPI + uvicorn | REST API for matchmaking, stats, leaderboard |
-| **nginx** | NGINX 1.27 | Load balancer, WebSocket proxy, sticky sessions |
-| **redis** | Redis 7 | Room state sync, player stats, leaderboard |
+| Matchmaking API | `matchmaking_api/main.py` | `POST /match/join` reserves a slot in an open room or asks the least-loaded game host to create one. Records results and serves the leaderboard. |
+| Room manager | `game_server/server.py` | Runs on each game host. Spawns/monitors headless Godot servers (`godot --headless -- --server --port=N --room=ID`), reads their `@@ROOM {json}` status lines, publishes rooms to Redis and relays WebSockets from one public port. |
+| Godot dedicated server | `scripts/network_manager.gd`, `scripts/online_match.gd`, `scripts/game_manager.gd` | One match per process: accepts 2 clients, runs rounds/combat, reports the winner to the API and exits when everyone has left. |
+| Redis | - | Rooms, matchmaking queue, server heartbeats, leaderboard. |
+| NGINX | `nginx/nginx.conf` | Local entry point: `/api/*` to the API pool, `/g1/*` and `/g2/*` to game hosts. |
 
----
+## Run it locally without Docker (fastest)
 
-## Local Development (Docker Compose)
+Needs Python 3.11+ and Godot 4.7:
 
-### Prerequisites
-- Docker Desktop installed and running
-- (Windows) WSL2 backend recommended
-
-### Start everything
 ```bash
-cd backend/
-docker compose up --build
+pip install websockets redis fakeredis fastapi uvicorn
+python backend/dev_stack.py        # API :8000, relay :8765, in-memory Redis
+```
+Set `GODOT_BIN` if Godot is not at the default Windows path. In the game open **ONLINE**, keep
+`http://127.0.0.1:8000`, press **FIND MATCH**, and start a second client (or a bot):
+
+```bash
+godot --headless --path . -- --client --matchmake=http://127.0.0.1:8000 --char=Samurai --name=Bot --bot
 ```
 
-### Endpoints (once running)
-| Endpoint | Description |
+## Run it with Docker Compose
+
+```bash
+cd backend && docker compose up --build
+```
+Game ONLINE menu address: `http://localhost:8080/api`. (Not yet exercised on this machine: Docker was not installed.)
+
+## Deploy to Google Cloud (Terraform)
+
+```bash
+cd backend/terraform && cp terraform.tfvars.example terraform.tfvars   # set project_id
+terraform init && terraform apply
+```
+Then build and push `game-server` (from the repo root: `docker build -f backend/game_server/Dockerfile .`) and
+`matchmaking-api` images to the Artifact Registry repository printed in the outputs and redeploy the services.
+Each **game host** is one Cloud Run instance running up to `rooms_per_host` matches (CPU always allocated, WebSocket
+timeout 1 h). Add capacity with `game_host_count`; the API spreads new rooms by load. Players enter the printed
+`matchmaking_api_url` in the ONLINE menu. (Terraform was written but not applied from this machine.)
+
+## Dedicated-server command line
+
+`godot --headless --path . -- --server --port=7100 --room=abc --api=http://api:8000 --rounds=2 --time=99`
+
+| Flag | Meaning |
 |---|---|
-| `ws://localhost:8080/ws` | WebSocket game server (via NGINX) |
-| `http://localhost:8080/api/match/join` | POST — join a match |
-| `http://localhost:8080/api/stats/leaderboard` | GET — top players |
-| `http://localhost:8080/docs` | FastAPI Swagger UI |
-| `http://localhost:8080/nginx-health` | NGINX health check |
+| `--server` | run as dedicated server (also implied by `--headless` without `--join/--client`) |
+| `--port`, `--room` | listen port and room id |
+| `--api` | where to POST `/stats/result` |
+| `--rounds`, `--time` | rounds to win, seconds per round |
+| `--idle` | seconds to wait for players before exiting (default 90) |
 
-### Scale game servers
-```bash
-# Bring up 4 game-server instances:
-docker compose up --scale game-server-1=1 --scale game-server-2=1
-# Or just edit nginx/nginx.conf upstream block and re-run
-```
+Test client flags: `--client --join=ws://host:port` or `--client --matchmake=http://api`, plus `--char`, `--name`, `--bot`
+(random play), `--rematch`, `--shot=a.png --shot-at=10` (screenshots).
 
-### Stop & clean up
-```bash
-docker compose down -v   # -v removes Redis volume too
-```
+## API summary
 
----
+`POST /match/join {player_name}` -> `{room_id, ws_url, ...}` · `GET /match/{room_id}` · `GET /rooms` ·
+`POST /stats/result {room_id, winner_name, duration_s}` · `GET /stats/leaderboard?top=10` · `GET /stats/player/{name}` · `GET /health`
 
-## Deploy to GCP Cloud Run
+## Accounts and SERVER_KEY
 
-You have two options for deploying to Google Cloud: using the provided Bash script or using Terraform (Infrastructure as Code).
+Online play requires an account (`/auth/register`, `/auth/login`). Passwords are hashed with scrypt; the
+client keeps only an opaque session token. `/match/join` needs that token and returns a one-time
+join ticket that the game server redeems (`/auth/ticket/redeem`) to learn who connected.
 
-### Option 1: Terraform (Recommended for Production)
+`SERVER_KEY` is a shared secret between the API and game hosts, protecting ticket redemption and
+`/stats/result`. Docker: copy `.env.example` to `.env` and set a long random value. Terraform generates one
+(`random_password.server_key`). Production notes: serve the API over HTTPS, use a durable Redis (AOF /
+Memorystore with persistence) since accounts live there; there is no password reset or email verification yet.
 
-We provide a complete Terraform setup in the [`terraform/`](terraform/) directory that manages the entire GCP infrastructure (Cloud Run, Memorystore Redis, VPC, Artifact Registry). 
+## Firestore (optional permanent store)
 
-See the [Terraform README](terraform/README.md) for full instructions on deploying via Terraform.
-
-### Option 2: Bash Script (Quickstart)
-
-#### One-time setup
-```bash
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com redis.googleapis.com vpcaccess.googleapis.com
-```
-
-#### Create a Memorystore Redis instance
-```bash
-gcloud redis instances create cloud-arena-redis \
-  --size=1 \
-  --region=us-central1 \
-  --redis-version=redis_7_0
-
-# Get the host IP:
-gcloud redis instances describe cloud-arena-redis --region=us-central1 \
-  --format="value(host)"
-```
-
-#### Deploy
-```bash
-cd backend/
-chmod +x cloud-run/deploy_cloudrun.sh
-./cloud-run/deploy_cloudrun.sh  YOUR_PROJECT_ID  us-central1  REDIS_IP
-```
-
-### Update Godot client
-After deploying, update [`NetworkManager.gd`](../scripts/network_manager.gd):
-```gdscript
-# Replace the join_game url with your Cloud Run URL (wss://)
-var url := "wss://<your-cloud-run-url>/ws"
-```
-
----
-
-## Environment Variables
-
-### game-server
-| Variable | Default | Description |
-|---|---|---|
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection string |
-| `PORT` | `8765` | WebSocket listen port |
-| `HEALTH_PORT` | `8766` | HTTP health check port |
-| `SERVER_ID` | auto UUID | Instance identifier |
-| `MAX_ROOMS` | `50` | Max concurrent rooms per instance |
-| `MAX_PLAYERS_ROOM` | `4` | Players per room |
-
-### matchmaking-api
-| Variable | Default | Description |
-|---|---|---|
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection string |
-| `GAME_SERVER_WS_HOST` | `ws://localhost:8765` | Public WS URL returned to clients |
-
----
-
-## API Reference
-
-### `POST /api/match/join`
-Find an available room or request a new one.
-```json
-// Request
-{ "player_name": "Purab", "preferred_room": null }
-
-// Response
-{ "room_id": "a1b2c3d4", "ws_url": "wss://...", "player_cnt": 1 }
-```
-
-### `GET /api/match/{room_id}`
-Check live match state.
-
-### `POST /api/stats/result`
-Record match result.
-```json
-{ "room_id": "a1b2c3d4", "winner_name": "Purab", "duration_s": 142.5 }
-```
-
-### `GET /api/stats/leaderboard?top=10`
-Top players by win count.
-
-### `GET /api/stats/player/{name}`
-Individual player stats.
+Set `FIRESTORE_PROJECT_ID` on the matchmaking API (Terraform does this) and accounts plus match history
+are also written to Firestore (`players/`, `matches/`). Writes happen in the background at sign-up and after
+a match; if Redis is wiped, a player's account is restored from Firestore on their next login. Firestore is
+never touched while a match is running. Unset = Redis only (local dev). Redis may also be configured with
+`REDIS_HOST`/`REDIS_PORT` instead of `REDIS_URL`.

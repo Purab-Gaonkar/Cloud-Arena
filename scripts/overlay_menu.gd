@@ -14,6 +14,7 @@ var _sub: Label
 var _hint: Label
 var _stats_box: VBoxContainer
 var _moves: Label
+var online: bool = false   # online match: never pauses the tree, rematch needs both players
 
 
 func _ready() -> void:
@@ -60,7 +61,7 @@ func _ready() -> void:
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(_hint)
 
-	_moves = UiStyle.label("MOVES:  tap ATTACK x3 = combo   |   HEAVY = slow, hard hit   |   double-tap a direction = dash (dash AWAY = invulnerable backdash)\nhold BLOCK facing your enemy = chip damage only   |   full meter + SUPER = unblockable finisher", 15, UiStyle.MUTED, false, 4)
+	_moves = UiStyle.label("MOVES:  tap ATTACK x3 = combo   |   HEAVY = slow, hard hit   |   double-tap = dash (away = invulnerable backdash)   |   hitting a swing during startup = COUNTER +25%\nhold BLOCK facing your enemy = chip damage (block just before impact = PARRY)   |   ATTACK + BLOCK up close = THROW (beats blockers)   |   full meter + SUPER = finisher (0.45s telegraph - dodge it!)", 15, UiStyle.MUTED, false, 4)
 	_moves.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_moves.visible = false
 	box.add_child(_moves)
@@ -105,17 +106,32 @@ func show_match_end(text: String, stats: Dictionary = {}) -> void:
 	_title.text = "VICTORY"
 	_sub.text = text
 	_hint.text = "ENTER / A  Rematch        C / X  Change fighters        M / B  Main menu"
+	if online:
+		_hint.text = "ENTER / A  Rematch (needs both players)          M / B  Leave"
 	_pop()
+
+
+func hide_overlay() -> void:
+	_mode = "none"
+	_panel.visible = false
+
+
+func _leave() -> void:
+	get_parent().online_leave()
 
 
 func _set_paused(paused: bool) -> void:
 	AudioManager.play("ui_open" if paused else "ui_back")
-	get_tree().paused = paused
+	if not online:
+		get_tree().paused = paused
 	_mode = "pause" if paused else "none"
 	_title.text = "PAUSED"
 	_sub.text = ""
 	_moves.visible = paused
 	_hint.text = "ESC / START  Resume      R / Y  Restart      C / X  Change fighters      M / B  Main menu"
+	if online:
+		_hint.text = "ESC / START  Resume          M / B  Leave match"
+		_moves.visible = paused
 	if paused:
 		_pop()
 	else:
@@ -124,6 +140,9 @@ func _set_paused(paused: bool) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_pressed() or event.is_echo():
+		return
+	if online:
+		_online_input(event)
 		return
 	match _mode:
 		"none":
@@ -145,3 +164,21 @@ func _unhandled_input(event: InputEvent) -> void:
 				Transition.go(SELECT_SCENE)
 			elif event.is_action_pressed("ov_menu") or event.is_action_pressed("ui_pause"):
 				Transition.go(MENU_SCENE)
+
+
+func _online_input(event: InputEvent) -> void:
+	match _mode:
+		"none":
+			if event.is_action_pressed("ui_pause"):
+				_set_paused(true)
+		"pause":
+			if event.is_action_pressed("ui_pause"):
+				_set_paused(false)
+			elif event.is_action_pressed("ov_menu") or event.is_action_pressed("ov_select"):
+				_leave()
+		"match_end":
+			if event.is_action_pressed("ui_accept") or event.is_action_pressed("ov_restart"):
+				_hint.text = "WAITING FOR OPPONENT TO ACCEPT..."
+				get_parent().online_request_rematch()
+			elif event.is_action_pressed("ov_menu") or event.is_action_pressed("ov_select") or event.is_action_pressed("ui_pause"):
+				_leave()

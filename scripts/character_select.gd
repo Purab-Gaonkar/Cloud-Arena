@@ -10,8 +10,11 @@ const MENU_SCENE: String = "res://scenes/main.tscn"
 
 var _vs_cpu: bool = false
 var _cursor: Array[int]  = [0, 1]
+var _palette: Array[int] = [0, 0]
 var _locked: Array[bool] = [false, false]
 var _starting: bool = false
+var _online: bool = false
+var _mm_busy: bool = false
 var _stage: int = 0
 
 var _world: Node2D
@@ -26,6 +29,13 @@ var _t: float = 0.0
 func _ready() -> void:
 	var root := get_tree().root
 	_vs_cpu = root.has_meta("vs_cpu") and root.get_meta("vs_cpu")
+	_online = root.has_meta("online") and root.get_meta("online")
+	if _online:
+		_vs_cpu = true            # single picker: P1's controls only
+		_cursor[1] = -1           # no second highlight
+		NetworkManager.matchmaking_status.connect(_on_mm_status)
+		NetworkManager.matchmaking_failed.connect(_on_mm_failed)
+		NetworkManager.network_ready.connect(_on_connected, CONNECT_ONE_SHOT)
 	_stage = root.get_meta("stage") if root.has_meta("stage") else randi() % WorldBuilder.stage_count()
 	AudioManager.play_music("menu")
 	_build_ui()
@@ -50,7 +60,7 @@ func _set_stage(index: int) -> void:
 	add_child(_world)
 	move_child(_world, 0)
 	_world.build(_stage)
-	_stage_label.text = "STAGE   <   %s   >      TAB to change" % WorldBuilder.stage_name(_stage)
+	_stage_label.text = "The server picks the arena" if _online else "STAGE   <   %s   >      TAB to change" % WorldBuilder.stage_name(_stage)
 
 
 func _build_ui() -> void:
@@ -93,7 +103,7 @@ func _build_ui() -> void:
 	var hint := UiStyle.label("", 14, UiStyle.TEXT, false, 5)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if _vs_cpu:
-		hint.text = "A / D or D-pad choose      J / A confirm      S / LB undo      TAB / RB stage      ESC / B back"
+		hint.text = "A / D or D-pad choose      J / A confirm      S / LB undo      U / Y palette      TAB / RB stage      ESC / B back"
 	else:
 		hint.text = "P1: A/D, J confirm, S undo     P2: Left/Right, / or Numpad 0 confirm, Down undo     (pads: D-pad, X confirm, LB undo)     TAB / RB stage     ESC back"
 	root.add_child(hint)
@@ -102,7 +112,7 @@ func _build_ui() -> void:
 func _build_card(index: int) -> Panel:
 	var f: Dictionary = FighterData.ROSTER[index]
 	var card := Panel.new()
-	card.custom_minimum_size = Vector2(300, 390)
+	card.custom_minimum_size = Vector2(300, 418)
 	_cards.append(card)
 
 	var tag := UiStyle.label("", 24, Color.WHITE, true, 6)
@@ -137,6 +147,12 @@ func _build_card(index: int) -> Panel:
 	var stat_names := ["POWER", "SPEED", "REACH"]
 	for s in range(3):
 		_add_stat_row(card, stat_names[s], f["stats"][s], f["color"], Vector2(40, 314 + s * 22))
+
+	var sup := UiStyle.label("SUPER:  " + str(f["super"]["name"]), 16, f["color"].lightened(0.3), true, 5)
+	sup.position = Vector2(0, 384)
+	sup.size = Vector2(300, 22)
+	sup.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card.add_child(sup)
 	return card
 
 
@@ -180,10 +196,15 @@ func _refresh() -> void:
 			txt += "P1" + (" READY" if _locked[0] else "")
 		if on2:
 			txt += ("  " if txt != "" else "") + ("CPU" if _vs_cpu else "P2") + (" READY" if _locked[1] else "")
+		var shown: int = _palette[0] if on1 else _palette[1]
+		_sprites[i].material = FighterData.palette_material(shown)
 		_tags[i].text = txt
 		_tags[i].add_theme_color_override("font_color", border)
 
-	if _vs_cpu:
+	if _online:
+		if not _mm_busy:
+			_prompt.text = "ONLINE - CHOOSE YOUR FIGHTER"
+	elif _vs_cpu:
 		_prompt.text = "CHOOSE YOUR OPPONENT" if _locked[0] else "PLAYER 1 - CHOOSE YOUR FIGHTER"
 	else:
 		_prompt.text = "BOTH PLAYERS CHOOSE, THEN CONFIRM"
@@ -193,15 +214,20 @@ func _poll_input() -> void:
 	if _starting:
 		return
 	if Input.is_action_just_pressed("ui_pause") or Input.is_action_just_pressed("ui_cancel") and not _any_locked():
+		if _online:
+			NetworkManager.cancel_matchmaking()
 		Transition.go(MENU_SCENE)
 		return
-	if Input.is_action_just_pressed("stage_next"):
+	if Input.is_action_just_pressed("stage_next") and not _online:
 		_set_stage(_stage + 1)
 		return
-	if Input.is_action_just_pressed("stage_prev"):
+	if Input.is_action_just_pressed("stage_prev") and not _online:
 		_set_stage(_stage - 1)
 		return
 
+	if _online:
+		_handle(0, "move_left", "move_right", "attack", "block")
+		return
 	if _vs_cpu:
 		# P1's controls drive both picks: first their own fighter, then the CPU opponent.
 		var who := 1 if _locked[0] else 0
@@ -216,7 +242,11 @@ func _any_locked() -> bool:
 
 
 func _handle(who: int, left: String, right: String, confirm: String, cancel: String) -> void:
-	if Input.is_action_just_pressed(left) and not _locked[who]:
+	var pal_action := "heavy" if (who == 0 or _vs_cpu) else "p2_heavy"
+	if Input.is_action_just_pressed(pal_action) and not _locked[who]:
+		_palette[who] = (_palette[who] + 1) % FighterData.PALETTE_HUES.size()
+		AudioManager.play("ui_toggle")
+	elif Input.is_action_just_pressed(left) and not _locked[who]:
 		_cursor[who] = wrapi(_cursor[who] - 1, 0, FighterData.ROSTER.size())
 		AudioManager.play("ui_move")
 	elif Input.is_action_just_pressed(right) and not _locked[who]:
@@ -227,8 +257,13 @@ func _handle(who: int, left: String, right: String, confirm: String, cancel: Str
 		AudioManager.play("ui_select")
 		AudioManager.play("hit_heavy", -8.0)
 		_sprites[_cursor[who]].play("attack_3")
+		if _online:
+			_locked[1] = true
 	elif Input.is_action_just_pressed(cancel):
 		AudioManager.play("ui_back")
+		if _online and _mm_busy:
+			_cancel_matchmaking()
+			return
 		if _locked[who]:
 			_locked[who] = false
 		elif _vs_cpu and who == 1:
@@ -242,12 +277,59 @@ func _handle(who: int, left: String, right: String, confirm: String, cancel: Str
 func _check_start() -> void:
 	if not (_locked[0] and _locked[1]):
 		return
+	if _online:
+		_start_matchmaking()
+		return
 	_starting = true
 	var root := get_tree().root
 	root.set_meta("local_mode", true)
 	root.set_meta("p1_char", FighterData.ROSTER[_cursor[0]]["id"])
 	root.set_meta("p2_char", FighterData.ROSTER[_cursor[1]]["id"])
+	root.set_meta("p1_pal", _palette[0])
+	root.set_meta("p2_pal", _palette[1])
 	root.set_meta("stage", _stage)
 	_prompt.text = "GET READY!"
 	await get_tree().create_timer(0.8).timeout
+	Transition.go(GAME_SCENE)
+
+
+# ── Online: matchmaking after the fighter is locked in ──────────────────────
+
+func _start_matchmaking() -> void:
+	if _mm_busy:
+		return
+	_mm_busy = true
+	var root := get_tree().root
+	root.set_meta("local_mode", false)
+	root.set_meta("p1_char", FighterData.ROSTER[_cursor[0]]["id"])
+	root.set_meta("p1_pal", _palette[0])
+	_prompt.text = "CONNECTING..."
+	NetworkManager.matchmake(str(root.get_meta("online_api")) if root.has_meta("online_api") else GameSettings.online_api)
+
+
+func _cancel_matchmaking() -> void:
+	NetworkManager.cancel_matchmaking()
+	_mm_busy = false
+	_locked = [false, false]
+	_refresh()
+
+
+func _on_mm_status(text: String) -> void:
+	_prompt.text = text.to_upper()
+
+
+func _on_mm_failed(reason: String) -> void:
+	_mm_busy = false
+	_locked = [false, false]
+	_refresh()
+	_prompt.text = reason.to_upper()
+	AudioManager.play("ui_error")
+
+
+func _on_connected() -> void:
+	if not _online or _starting:
+		return
+	_starting = true
+	_prompt.text = "OPPONENT SEARCH..."
+	await get_tree().create_timer(0.3).timeout
 	Transition.go(GAME_SCENE)

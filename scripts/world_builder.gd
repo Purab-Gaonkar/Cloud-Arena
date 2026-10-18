@@ -9,7 +9,7 @@ const GROUND_Y: float = 130.0
 
 const STAGES: Array[Dictionary] = [
 	{
-		"name": "TWILIGHT TEMPLE",
+		"name": "TWILIGHT TEMPLE", "actor_tint": Color(1.0, 0.93, 0.95),
 		"sky": [Color(0.07, 0.05, 0.2), Color(0.46, 0.2, 0.42), Color(1.0, 0.58, 0.32)],
 		"stars": 0.5, "orb": Color(1.0, 0.93, 0.8), "orb_glow": Color(1.0, 0.75, 0.5), "orb_pos": Vector2(0.72, 0.24), "orb_r": 58.0,
 		"cloud": Color(0.95, 0.55, 0.55, 0.28),
@@ -21,7 +21,7 @@ const STAGES: Array[Dictionary] = [
 		"bamboo": Color(0.16, 0.3, 0.26), "fx": "petal", "fx_color": Color(1.0, 0.72, 0.8),
 	},
 	{
-		"name": "MOONLIT BAMBOO",
+		"name": "MOONLIT BAMBOO", "actor_tint": Color(0.9, 0.96, 1.0),
 		"sky": [Color(0.02, 0.04, 0.14), Color(0.06, 0.14, 0.3), Color(0.14, 0.32, 0.45)],
 		"stars": 1.0, "orb": Color(0.92, 0.96, 1.0), "orb_glow": Color(0.6, 0.8, 1.0), "orb_pos": Vector2(0.28, 0.22), "orb_r": 52.0,
 		"cloud": Color(0.5, 0.65, 0.9, 0.2),
@@ -33,7 +33,7 @@ const STAGES: Array[Dictionary] = [
 		"bamboo": Color(0.1, 0.32, 0.26), "fx": "firefly", "fx_color": Color(0.85, 1.0, 0.5),
 	},
 	{
-		"name": "CRIMSON DAWN",
+		"name": "CRIMSON DAWN", "actor_tint": Color(1.0, 0.9, 0.86),
 		"sky": [Color(0.25, 0.08, 0.22), Color(0.85, 0.28, 0.25), Color(1.0, 0.78, 0.42)],
 		"stars": 0.0, "orb": Color(1.0, 0.86, 0.55), "orb_glow": Color(1.0, 0.5, 0.25), "orb_pos": Vector2(0.5, 0.52), "orb_r": 96.0,
 		"cloud": Color(1.0, 0.7, 0.5, 0.32),
@@ -43,6 +43,18 @@ const STAGES: Array[Dictionary] = [
 		"floor": Color(0.44, 0.22, 0.26), "floor_edge": Color(1.0, 0.7, 0.5), "floor_line": Color(0.2, 0.08, 0.12),
 		"leaf": Color(1.0, 0.45, 0.45), "leaf2": Color(1.0, 0.8, 0.7), "bark": Color(0.2, 0.07, 0.12),
 		"bamboo": Color(0.3, 0.2, 0.18), "fx": "ember", "fx_color": Color(1.0, 0.7, 0.3),
+	},
+	{
+		"name": "FROZEN SHRINE", "actor_tint": Color(0.93, 0.97, 1.0),
+		"sky": [Color(0.12, 0.18, 0.38), Color(0.5, 0.62, 0.82), Color(0.9, 0.93, 1.0)],
+		"stars": 0.35, "orb": Color(0.97, 0.98, 1.0), "orb_glow": Color(0.75, 0.88, 1.0), "orb_pos": Vector2(0.65, 0.2), "orb_r": 64.0,
+		"cloud": Color(0.95, 0.97, 1.0, 0.32),
+		"far": Color(0.55, 0.65, 0.82), "mid": Color(0.4, 0.5, 0.7), "near": Color(0.26, 0.36, 0.55),
+		"pagoda": Color(0.3, 0.38, 0.58), "glow": Color(1.0, 0.85, 0.5), "mist": Color(0.85, 0.92, 1.0),
+		"torii": Color(0.75, 0.15, 0.15), "torii_dark": Color(0.08, 0.1, 0.2),
+		"floor": Color(0.62, 0.7, 0.82), "floor_edge": Color(0.97, 0.98, 1.0), "floor_line": Color(0.35, 0.44, 0.6),
+		"leaf": Color(0.85, 0.92, 1.0), "leaf2": Color(1.0, 1.0, 1.0), "bark": Color(0.18, 0.2, 0.3),
+		"bamboo": Color(0.3, 0.5, 0.5), "fx": "snow", "fx_color": Color(1.0, 1.0, 1.0),
 	},
 ]
 
@@ -55,11 +67,15 @@ static func stage_count() -> int:
 	return STAGES.size()
 
 
+static func actor_tint(index: int) -> Color:
+	return STAGES[posmod(index, STAGES.size())].get("actor_tint", Color.WHITE)
+
+
 static func stage_name(index: int) -> String:
 	return STAGES[posmod(index, STAGES.size())]["name"]
 
 
-func build(stage_index: int, viewport_size: Vector2 = Vector2(1280, 720)) -> void:
+func build(stage_index: int, viewport_size: Vector2 = Vector2(1280, 720), with_vignette: bool = false) -> void:
 	theme = STAGES[posmod(stage_index, STAGES.size())]
 	z_index = -100
 	_build_sky(viewport_size)
@@ -129,6 +145,7 @@ func build(stage_index: int, viewport_size: Vector2 = Vector2(1280, 720)) -> voi
 	var dark: Color = theme["torii_dark"]
 	var l_fg1 := _layer(1.18, 1.2)
 	l_fg1.z_index = 220
+	l_fg1.modulate.a = 0.85
 	for i in range(8):
 		var x := -2200 + i * 620 + (i * 131) % 180
 		if absf(x) < 420:
@@ -139,17 +156,19 @@ func build(stage_index: int, viewport_size: Vector2 = Vector2(1280, 720)) -> voi
 
 	var l_fg2 := _layer(1.5, 2.6)
 	l_fg2.z_index = 230
+	l_fg2.modulate.a = 0.7
 	for sx in [-1.0, 1.0]:
 		_spawn(l_fg2, "bamboo", Vector2(sx * 1060, GROUND_Y + 190), dark, dark.lightened(0.05), 100.0, 640.0, 1.0, 0.0, 6 + int(absf(sx)))
 		_spawn(l_fg2, "vine", Vector2(sx * 760, GROUND_Y - 640), dark, theme["bamboo"].darkened(0.5), 120.0, 400.0, 1.0, 0.0, int(sx * 5) + 1)
 		_spawn(l_fg2, "vine", Vector2(sx * 1180, GROUND_Y - 640), dark, theme["bamboo"].darkened(0.5), 120.0, 300.0, 1.0, 0.0, int(sx * 5) + 4)
 
-	_build_vignette()
+	if with_vignette:
+		_build_vignette()
 
 
 func _layer(factor: float, blur: float = 0.0) -> Node2D:
 	var n: Node2D
-	if blur > 0.0:
+	if blur > 0.0 and GameSettings.fg_blur:
 		var g := CanvasGroup.new()
 		g.fit_margin = 60.0
 		var mat := ShaderMaterial.new()
@@ -293,6 +312,18 @@ func _build_particles() -> void:
 			p.angular_velocity_max = 120.0
 			p.scale_amount_min = 3.0
 			p.scale_amount_max = 6.0
+		"snow":
+			p.position = Vector2(0, GROUND_Y - 700)
+			p.emission_rect_extents = Vector2(1900, 10)
+			p.amount = 140
+			p.lifetime = 9.0
+			p.direction = Vector2(-0.25, 1.0)
+			p.spread = 18.0
+			p.initial_velocity_min = 40.0
+			p.initial_velocity_max = 90.0
+			p.gravity = Vector2(-8, 22)
+			p.scale_amount_min = 2.0
+			p.scale_amount_max = 5.0
 		"firefly":
 			p.position = Vector2(0, GROUND_Y - 160)
 			p.emission_rect_extents = Vector2(1500, 150)

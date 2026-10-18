@@ -24,8 +24,8 @@ func set_value(v: float) -> void:
 
 
 func reset() -> void:
-	value = max_value
-	ghost = max_value
+	value = 0.0 if meter_mode else max_value
+	ghost = value
 	queue_redraw()
 
 

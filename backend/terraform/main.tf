@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -26,6 +30,11 @@ resource "google_project_service" "run" {
 
 resource "google_project_service" "redis" {
   service            = "redis.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "firestore" {
+  service            = "firestore.googleapis.com"
   disable_on_destroy = false
 }
 
@@ -79,15 +88,27 @@ resource "google_vpc_access_connector" "connector" {
   depends_on    = [google_project_service.vpcaccess]
 }
 
-# ── Cloud Run: Game Server ────────────────────────────────────────────────────
-resource "google_cloud_run_v2_service" "game_server" {
-  name     = "cloud-arena-game-server"
+# ── Cloud Run: Game hosts ─────────────────────────────────────────────────────
+# A game host = the Python room manager + headless Godot match processes (one per room).
+# Every room must be reached on the SAME instance that runs it, so each host service is capped at
+# ONE instance and capacity is added by raising var.game_host_count (the matchmaking API spreads new
+# rooms across hosts by load). Each host advertises its own deterministic Cloud Run URL.
+data "google_project" "project" {}
+
+locals {
+  game_host_names = [for i in range(var.game_host_count) : "cloud-arena-game-${i + 1}"]
+  game_host_urls  = [for n in local.game_host_names : "wss://${n}-${data.google_project.project.number}.${var.region}.run.app"]
+}
+
+resource "google_cloud_run_v2_service" "game_host" {
+  count    = var.game_host_count
+  name     = local.game_host_names[count.index]
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
     scaling {
-      max_instance_count = 10
+      max_instance_count = 1
       min_instance_count = 1
     }
     vpc_access {
@@ -96,9 +117,8 @@ resource "google_cloud_run_v2_service" "game_server" {
     }
     containers {
       image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.repo.name}/game-server:latest"
-      
+
       ports {
-        name           = "h2c" # WebSocket requires HTTP/2 cleartext in Cloud Run
         container_port = 8765
       }
 
@@ -111,66 +131,69 @@ resource "google_cloud_run_v2_service" "game_server" {
         value = "8765"
       }
       env {
-        name  = "HEALTH_PORT"
-        value = "8766"
+        name  = "SERVER_ID"
+        value = local.game_host_names[count.index]
+      }
+      env {
+        name  = "PUBLIC_WS_BASE"
+        value = local.game_host_urls[count.index]
+      }
+      env {
+        name  = "API_URL"
+        value = google_cloud_run_v2_service.matchmaking_api.uri
+      }
+      env {
+        name  = "SERVER_KEY"
+        value = random_password.server_key.result
       }
       env {
         name  = "MAX_ROOMS"
-        value = "50"
-      }
-      env {
-        name  = "MAX_PLAYERS_ROOM"
-        value = "4"
+        value = tostring(var.rooms_per_host)
       }
 
       resources {
         limits = {
-          cpu    = "1"
-          memory = "512Mi"
+          cpu    = "2"
+          memory = "2Gi"
         }
-        # CPU must be always allocated for WebSockets
-        cpu_idle = false 
+        # CPU must stay allocated: matches run in background processes between requests
+        cpu_idle = false
       }
 
-      liveness_probe {
-        http_get {
-          path = "/health"
-          port = 8766
-        }
-        initial_delay_seconds = 10
-        period_seconds        = 30
-      }
-      
       startup_probe {
         http_get {
           path = "/health"
-          port = 8766
+          port = 8765
         }
         initial_delay_seconds = 5
         period_seconds        = 5
-        failure_threshold     = 6
+        failure_threshold     = 12
+      }
+      liveness_probe {
+        http_get {
+          path = "/health"
+          port = 8765
+        }
+        period_seconds = 30
       }
     }
-    
-    timeout = "3600s" # Long timeout for persistent WebSocket connections
-    max_instance_request_concurrency = 100
+
+    timeout                          = "3600s" # long-lived WebSocket connections
+    max_instance_request_concurrency = 200
   }
 
   depends_on = [google_project_service.run]
-  
-  # Ignore image changes to avoid Terraform reverting deployments done via CI/CD
+
   lifecycle {
-    ignore_changes = [
-      template[0].containers[0].image
-    ]
+    ignore_changes = [template[0].containers[0].image]
   }
 }
 
-# Allow public unauthenticated access to Game Server
-resource "google_cloud_run_v2_service_iam_member" "game_server_public" {
-  project  = google_cloud_run_v2_service.game_server.project
-  location = google_cloud_run_v2_service.game_server.location
-  name     = google_cloud_run_v2_service.game_server.name
+resource "google_cloud_run_v2_service_iam_member" "game_host_public" {
+  count    = var.game_host_count
+  project  = google_cloud_run_v2_service.game_host[count.index].project
+  location = google_cloud_run_v2_service.game_host[count.index].location
+  name     = google_cloud_run_v2_service.game_host[count.index].name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
@@ -202,15 +225,17 @@ resource "google_cloud_run_v2_service" "matchmaking_api" {
         value = "redis://${google_redis_instance.redis.host}:${google_redis_instance.redis.port}"
       }
       env {
-        name  = "GAME_SERVER_WS_HOST"
-        # Extract hostname from the game server URI and format as wss://
-        value = replace(google_cloud_run_v2_service.game_server.uri, "https://", "wss://")
+        name  = "SERVER_KEY"
+        value = random_password.server_key.result
       }
-
+      env {
+        name  = "FIRESTORE_PROJECT_ID"
+        value = var.project_id
+      }
       resources {
         limits = {
           cpu    = "1"
-          memory = "256Mi"
+          memory = "512Mi"
         }
       }
 
@@ -245,4 +270,40 @@ resource "google_cloud_run_v2_service_iam_member" "matchmaking_api_public" {
   name     = google_cloud_run_v2_service.matchmaking_api.name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+
+# Shared secret between the game hosts and the matchmaking API (ticket redemption, match results).
+resource "random_password" "server_key" {
+  length  = 40
+  special = false
+}
+
+
+# Permanent store for accounts and match history (the API writes to it after matches; Redis stays the live cache).
+# Created with gcloud only if the project has no default database yet, and never deleted by terraform destroy,
+# so re-applying after a destroy needs no import. Requires gcloud (preinstalled in Cloud Shell).
+resource "terraform_data" "firestore" {
+  input = var.project_id
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
+      gcloud firestore databases describe --database='(default)' --project='${var.project_id}' >/dev/null 2>&1         || gcloud firestore databases create --database='(default)' --location='${var.region}' --type=firestore-native --project='${var.project_id}'
+    EOT
+  }
+
+  depends_on = [google_project_service.firestore]
+}
+
+resource "google_project_iam_member" "api_firestore" {
+  depends_on = [terraform_data.firestore]
+  project = var.project_id
+  role    = "roles/datastore.user"
+  member  = "serviceAccount:${data.google_compute_default_service_account.default.email}"
+}
+
+data "google_compute_default_service_account" "default" {
+  project    = var.project_id
+  depends_on = [google_project_service.compute]
 }

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CloudArena - Business Requirements Document</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  :root { --ink:#1b1830; --accent:#c2410c; --gold:#b7791f; --mute:#5b5873; --line:#d9d6e6; --bg:#f6f4fb; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.5; margin: 0; }
+  h1,h2,h3 { font-family: "Segoe UI Semibold", "Segoe UI", Arial, sans-serif; line-height: 1.2; }
+  h1 { font-size: 17pt; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 4px; margin: 26px 0 10px; page-break-after: avoid; }
+  h2 { font-size: 12.5pt; margin: 18px 0 6px; page-break-after: avoid; }
+  p { margin: 6px 0; }
+  ul, ol { margin: 6px 0 6px 20px; padding: 0; }
+  li { margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 9.5pt; }
+  tr { page-break-inside: avoid; }
+  th { background: #2a2250; color: #fff; text-align: left; padding: 6px 8px; font-weight: 600; }
+  td { border-bottom: 1px solid var(--line); padding: 5px 8px; vertical-align: top; }
+  tr:nth-child(even) td { background: var(--bg); }
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+  .cover .tag { color: var(--gold); letter-spacing: 3px; font-weight: 700; font-size: 11pt; }
+  .cover h1.title { font-size: 40pt; border: none; color: var(--ink); margin: 6px 0; }
+  .cover .sub { font-size: 15pt; color: var(--mute); margin-bottom: 40px; }
+  .cover table { width: 75%; }
+  .must { color:#b91c1c; font-weight:700; } .should { color:#b45309; font-weight:700; } .could { color:#4b5563; font-weight:700; }
+  .P { display:inline-block; padding:1px 8px; border-radius:10px; font-size:8.5pt; font-weight:700; color:#fff; }
+  .p { background:#2a2250; } .s { background:#0f766e; }
+  .box { background: var(--bg); border-left: 4px solid var(--gold); padding: 8px 12px; margin: 10px 0; }
+  .pb { page-break-before: always; }
+  code { font-family: Consolas, monospace; font-size: 9pt; background: #eceaf6; padding: 0 3px; border-radius: 3px; }
+  pre { background:#1f1b3a; color:#e9e6ff; padding: 10px 12px; font-size: 8.5pt; line-height: 1.35; border-radius: 4px; white-space: pre; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="tag">BUSINESS REQUIREMENTS DOCUMENT</div>
+  <h1 class="title">CloudArena</h1>
+  <div class="sub">A cloud-powered 2D arcade fighting game - project plan</div>
+  <table>
+    <tr><th colspan="2">Document control</th></tr>
+    <tr><td>Version</td><td>1.0</td></tr>
+    <tr><td>Date</td><td>16 October 2026</td></tr>
+    <tr><td>Development team</td><td>Purab Gaonkar, Saniya Bhartu</td></tr>
+    <tr><td>Game engine</td><td>Godot 4 (GDScript)</td></tr>
+    <tr><td>Cloud platform</td><td>Google Cloud Platform (Cloud Run, Memorystore Redis, Terraform)</td></tr>
+  </table>
+</div>
+
+<h1 style="margin-top:0">1. Project overview</h1>
+<p><b>CloudArena</b> is a 1v1 arcade fighting game in the spirit of Street Fighter and Tekken. Two fighters battle across best-of-N rounds on atmospheric, layered stages, using combos, heavy attacks, blocks, throws, dashes and a cinematic super move. The game will be playable offline against the computer or a friend on the same PC, and online against players anywhere through a cloud-hosted, server-authoritative backend.</p>
+<div class="box"><b>Vision:</b> a polished, replayable fighting game that works fully offline and scales to online play on cloud infrastructure that is cheap when idle and elastic under load.</div>
+
+<h1>2. Business objectives</h1>
+<table>
+  <tr><th style="width:8%">ID</th><th style="width:42%">Objective</th><th>How success will be measured</th></tr>
+  <tr><td>BO-1</td><td>Deliver a complete, polished single-machine game</td><td>New player reaches a finished match within 60 seconds of launch; automated full-match soak tests run without errors.</td></tr>
+  <tr><td>BO-2</td><td>Give combat real depth</td><td>At least eight distinct combat actions, each with counter-play.</td></tr>
+  <tr><td>BO-3</td><td>Work on any input device</td><td>Complete play on keyboard and gamepad with every control rebindable.</td></tr>
+  <tr><td>BO-4</td><td>Professional audiovisual presentation</td><td>Animated menus, layered stages, consistent HUD, music and sound on every screen.</td></tr>
+  <tr><td>BO-5</td><td>Online multiplayer that scales</td><td>Matchmaking in constant time; rooms spread across instances; stable 60 Hz server simulation.</td></tr>
+  <tr><td>BO-6</td><td>Low operating cost</td><td>Scale-to-zero compute and one small Redis instance at launch.</td></tr>
+</table>
+
+<h1>3. Scope</h1>
+<h2>3.1 In scope</h2>
+<ul>
+  <li>Desktop game client built with Godot 4 (Windows; Linux build for the dedicated server).</li>
+  <li>Game modes: VS CPU, Local 2-Player, Training, Online Match.</li>
+  <li>Three fighters, four stages, configurable round rules.</li>
+  <li>Gamepad support and fully rebindable controls.</li>
+  <li>Music, sound effects and volume settings from licence-compatible assets.</li>
+  <li>Cloud backend: WebSocket game server, matchmaking and statistics API, Redis, NGINX, Terraform deployment.</li>
+  <li>Automated testing, build/export pipeline and release packaging.</li>
+</ul>
+<h2>3.2 Out of scope</h2>
+<ul>
+  <li>Mobile and console ports.</li>
+  <li>Player accounts, payments, cosmetic store, ranked ladders.</li>
+  <li>Replays, spectator mode and tournament tools.</li>
+  <li>Rollback netcode (the first online release is server-authoritative).</li>
+</ul>
+
+<h1>4. Planned features</h1>
+<p>Priority: <span class="must">MUST</span> required for release, <span class="should">SHOULD</span> important, <span class="could">COULD</span> if time allows.</p>
+
+<h2>4.1 Game modes and flow</h2>
+<table>
+  <tr><th style="width:9%">ID</th><th>Feature</th><th style="width:10%">Priority</th></tr>
+  <tr><td>F-01</td><td>Animated loading screen with real asset-loading progress, then fade to the main menu</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-02</td><td>Main menu with animated arena backdrop: VS CPU, Local 2P, Training, Online, Controls, Options, Credits, Quit</td><td class="must">MUST</td></tr>
+  <tr><td>F-03</td><td>Character select with stage choice and colour palettes</td><td class="must">MUST</td></tr>
+  <tr><td>F-04</td><td>Match rules: 1, 2 or 3 rounds to win; 99/60/30 s or unlimited timer; draw handling</td><td class="must">MUST</td></tr>
+  <tr><td>F-05</td><td>Round presentation: VS intro, ROUND / FINAL ROUND, FIGHT, K.O., TIME UP, PERFECT, win banners</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-06</td><td>Victory screen with match statistics (rounds, damage, best combo, supers, time); rematch and navigation options</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-07</td><td>Pause menu with move list</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-08</td><td>Training mode with configurable dummy (stand / block / fight back), infinite meter and live damage readout</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-09</td><td>CPU opponent with easy / normal / hard behaviour</td><td class="must">MUST</td></tr>
+</table>
+
+<h2>4.2 Combat</h2>
+<table>
+  <tr><th style="width:9%">ID</th><th>Feature</th><th style="width:10%">Priority</th></tr>
+  <tr><td>F-10</td><td>Three-hit light combo with launching finisher</td><td class="must">MUST</td></tr>
+  <tr><td>F-11</td><td>Heavy attack with charge-up and large knockback</td><td class="must">MUST</td></tr>
+  <tr><td>F-12</td><td>Block with chip damage; attacks from behind unblockable</td><td class="must">MUST</td></tr>
+  <tr><td>F-13</td><td>Parry: precisely timed block negates damage and staggers the attacker</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-14</td><td>Throw (attack + block) that beats defensive play</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-15</td><td>Dash and invulnerable backdash (double-tap)</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-16</td><td>Counter hits (bonus damage during attack start-up), combo damage scaling, wake-up invulnerability</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-17</td><td>Super meter and one cinematic super per fighter. Telegraphed start-up; the freeze-frame cinematic plays only when the first hit connects, so the defender can dodge</td><td class="must">MUST</td></tr>
+  <tr><td>F-18</td><td>Hit feedback: hit-stop, screen shake, camera punch, particles, floating damage numbers, combo counter, slow-motion K.O.</td><td class="must">MUST</td></tr>
+  <tr><td>F-19</td><td>Fighters push apart instead of colliding so nobody can stand on another</td><td class="must">MUST</td></tr>
+</table>
+
+<h2>4.3 Fighters, stages and visuals</h2>
+<table>
+  <tr><th style="width:9%">ID</th><th>Feature</th><th style="width:10%">Priority</th></tr>
+  <tr><td>F-20</td><td>Three fighters with distinct stats and supers: Brawler (balanced), Samurai (long reach), Shinobi (fast)</td><td class="must">MUST</td></tr>
+  <tr><td>F-21</td><td>Four stages with parallax depth layers, light rays, ambient particles, blurred foreground planes and vignette</td><td class="must">MUST</td></tr>
+  <tr><td>F-22</td><td>Arcade HUD: slanted health bars with damage trail, portraits, super meter, round pips, timer, announcer banners</td><td class="must">MUST</td></tr>
+  <tr><td>F-23</td><td>Dynamic camera with zoom, parallax and cinematic moments</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-24</td><td>Extra move and effect sprites produced by a reproducible generator script, replaceable by hand-drawn art</td><td class="should">SHOULD</td></tr>
+</table>
+
+<h2>4.4 Input, audio and settings</h2>
+<table>
+  <tr><th style="width:9%">ID</th><th>Feature</th><th style="width:10%">Priority</th></tr>
+  <tr><td>F-30</td><td>Gamepad support for both players, including menu navigation</td><td class="must">MUST</td></tr>
+  <tr><td>F-31</td><td>Controls menu to rebind every action for keyboard and gamepad; saved between sessions</td><td class="must">MUST</td></tr>
+  <tr><td>F-32</td><td>Music per screen, pooled sound effects, jingles, volume sliders</td><td class="must">MUST</td></tr>
+  <tr><td>F-33</td><td>Options: CPU difficulty, rounds, round time, screen shake, fullscreen, foreground blur</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-34</td><td>First-match controls tip and in-game credits screen</td><td class="could">COULD</td></tr>
+</table>
+
+<h2>4.5 Online multiplayer and cloud</h2>
+<table>
+  <tr><th style="width:9%">ID</th><th>Feature</th><th style="width:10%">Priority</th></tr>
+  <tr><td>F-40</td><td>Matchmaking API: join returns a room and WebSocket address; open rooms handed out in constant time via a Redis list; rooms expire after 10 minutes</td><td class="must">MUST</td></tr>
+  <tr><td>F-41</td><td>Game server: 60 Hz authoritative simulation per room, state broadcast, separate HTTP health endpoint</td><td class="must">MUST</td></tr>
+  <tr><td>F-42</td><td>Network protocol: client sends inputs only (move, jump, attack, heavy, block, super, dash, throw); server validates the sender and returns state</td><td class="must">MUST</td></tr>
+  <tr><td>F-43</td><td>Client online flow: matchmaking screen, connect, wait-for-opponent, in-match HUD, disconnect handling</td><td class="must">MUST</td></tr>
+  <tr><td>F-44</td><td>Replicate the full combat feature set online: chosen fighter and stage, meter, supers, parry, throw, dash, round and match flow driven by the server</td><td class="must">MUST</td></tr>
+  <tr><td>F-45</td><td>Match results feed a global win leaderboard (<code>/api/stats/result</code>, <code>/api/stats/leaderboard</code>, <code>/api/stats/player/{name}</code>) and an in-game leaderboard screen</td><td class="should">SHOULD</td></tr>
+  <tr><td>F-46</td><td>Keepalive pings every 20 seconds to survive the Cloud Run idle timeout; reconnect on short drops</td><td class="must">MUST</td></tr>
+  <tr><td>F-47</td><td>NGINX load balancing: sticky WebSocket routing (<code>ip_hash</code>), least-connection API routing, health endpoint</td><td class="must">MUST</td></tr>
+  <tr><td>F-48</td><td>One-command infrastructure with Terraform: Cloud Run services, Memorystore Redis, VPC connector, Artifact Registry; Docker Compose for local development</td><td class="must">MUST</td></tr>
+  <tr><td>F-49</td><td>Dedicated headless server export for Linux</td><td class="must">MUST</td></tr>
+  <tr><td>F-50</td><td>Structured JSON logging, health checks, dashboards and alerts in Cloud Logging / Monitoring</td><td class="should">SHOULD</td></tr>
+</table>
+
+<h1 class="pb">5. Technology stack</h1>
+<table>
+  <tr><th style="width:22%">Layer</th><th style="width:30%">Technology</th><th>Purpose</th></tr>
+  <tr><td>Game engine</td><td>Godot 4.x, GDScript</td><td>Rendering, physics, input, UI, audio, scene management, networking client.</td></tr>
+  <tr><td>Client networking</td><td>WebSocketMultiplayerPeer, RPC, MultiplayerSynchronizer</td><td>Server-authoritative gameplay with state replication.</td></tr>
+  <tr><td>Asset tooling</td><td>Python 3, Pillow, NumPy</td><td>Generates extra move and effect sprites reproducibly.</td></tr>
+  <tr><td>Game server</td><td>Python 3.11, <code>websockets</code>, <code>redis.asyncio</code></td><td>Real-time room simulation at 60 Hz; HTTP health probe on a separate port.</td></tr>
+  <tr><td>Matchmaking / stats API</td><td>FastAPI, Uvicorn, Pydantic</td><td>Room assignment, match state, results, leaderboard.</td></tr>
+  <tr><td>Shared state</td><td>Redis 7 (Memorystore in the cloud)</td><td>Matchmaking queue, room keys with TTL, sorted-set leaderboard.</td></tr>
+  <tr><td>Load balancer</td><td>NGINX 1.27</td><td>Sticky WebSockets and balanced REST traffic.</td></tr>
+  <tr><td>Containers</td><td>Docker, Docker Compose</td><td>Reproducible local backend stack.</td></tr>
+  <tr><td>Cloud hosting</td><td>GCP: Cloud Run v2, Memorystore, Serverless VPC Access, Artifact Registry</td><td>Autoscaling, scale-to-zero hosting.</td></tr>
+  <tr><td>Infrastructure as code</td><td>Terraform 1.5+, gcloud CLI</td><td>Repeatable provisioning and teardown.</td></tr>
+  <tr><td>Quality</td><td>Godot headless test scripts, pytest, load-testing tool (k6 or Locust), GitHub Actions</td><td>Automated gameplay soak tests, API tests, WebSocket load tests, CI builds.</td></tr>
+  <tr><td>Source control</td><td>Git, pull-request workflow</td><td>Collaboration between the two developers.</td></tr>
+</table>
+
+<h2>Architecture</h2>
+<pre>
+ Godot 4 clients ──HTTP / WebSocket──▶  NGINX load balancer
+                                          • ip_hash   → game servers (sticky WebSocket)
+                                          • least_conn → matchmaking API
+                                   ┌───────────────┴───────────────┐
+                        Game servers 1..N (:8765)       Matchmaking API 1..N (:8000)
+                        websockets, 60 Hz tick          FastAPI
+                                   └───────────────┬───────────────┘
+                                            Redis 7 (:6379)
+                          matchmaking queue · room metadata · win leaderboard
+</pre>
+<p>Design principles: the server owns the simulation and clients send inputs only; services are stateless and scale by adding instances; all shared state lives in Redis; infrastructure is fully described as code.</p>
+
+<h1>6. Non-functional requirements</h1>
+<table>
+  <tr><th style="width:17%">Category</th><th>Requirement</th></tr>
+  <tr><td>Performance</td><td>60 FPS or better at 1280x720 on integrated graphics; server tick 60 Hz.</td></tr>
+  <tr><td>Responsiveness</td><td>Local input-to-action latency within one physics frame; online round-trip target under 100 ms in region.</td></tr>
+  <tr><td>Reliability</td><td>Zero script errors across automated full-match soak and random-input tests; graceful handling of missing optional assets and corrupt settings.</td></tr>
+  <tr><td>Scalability</td><td>Stateless containers behind a balancer; add instances to add capacity.</td></tr>
+  <tr><td>Security</td><td>Server validates every input and its sender; no secrets in the client; least-privilege cloud service accounts.</td></tr>
+  <tr><td>Usability and accessibility</td><td>Readable HUD, full gamepad parity, rebindable controls, screen-shake toggle, adjustable audio.</td></tr>
+  <tr><td>Maintainability</td><td>Data-driven fighters and stages, shared UI module, documented repository guide, reproducible tooling.</td></tr>
+  <tr><td>Observability</td><td>JSON logs, health endpoints on all services, dashboards and alerts.</td></tr>
+  <tr><td>Legal</td><td>Only assets with compatible licences; credits screen and credits file kept current.</td></tr>
+  <tr><td>Cost</td><td>Scale-to-zero compute, smallest viable Redis tier, budget alerts, one-command teardown.</td></tr>
+</table>
+
+<h1 class="pb">7. Delivery plan</h1>
+<table>
+  <tr><th style="width:17%">Phase</th><th style="width:12%">Duration</th><th>Deliverables</th></tr>
+  <tr><td>1. Foundations</td><td>Weeks 1-2</td><td>Repository workflow, coding standards, client/server message contract, local Docker stack, base combat, HUD and round flow.</td></tr>
+  <tr><td>2. Local game</td><td>Weeks 3-6</td><td>All three fighters, combat set (F-10 to F-19), CPU, training, stages, menus, audio, settings, gamepad and rebinding.</td></tr>
+  <tr><td>3. Backend services</td><td>Weeks 3-6 (parallel)</td><td>Matchmaking API, game server rooms, Redis model, NGINX, Terraform and Cloud Run deployment, CI.</td></tr>
+  <tr><td>4. Online integration</td><td>Weeks 7-9</td><td>Client online flow, full feature replication, server-driven rounds, reconnect handling, leaderboard reporting and screen.</td></tr>
+  <tr><td>5. Hardening</td><td>Weeks 10-11</td><td>Load and soak tests, latency tuning, balance pass, monitoring and alerts, bug fixing.</td></tr>
+  <tr><td>6. Release</td><td>Week 12</td><td>Windows and Linux builds, deployment to production project, release notes, documentation, post-launch checklist.</td></tr>
+</table>
+
+<h1>8. Assumptions, constraints and dependencies</h1>
+<ul>
+  <li><b>Assumptions:</b> players use Windows 10/11 with a Direct3D 12 or Vulkan GPU; online play targets a single GCP region at first; two developers are available throughout.</li>
+  <li><b>Constraints:</b> Cloud Run closes idle WebSockets after 5 minutes; connections must reach the same instance as their room; extra move art is generated from existing sprites rather than hand-drawn; fixed team size.</li>
+  <li><b>Dependencies:</b> Godot 4, a GCP project with billing, Docker, Terraform, and the free/CC0 art and audio packs listed in section 10.</li>
+</ul>
+
+<h1>9. Risks and mitigations</h1>
+<table>
+  <tr><th style="width:5%">#</th><th style="width:30%">Risk</th><th style="width:10%">Impact</th><th>Mitigation</th></tr>
+  <tr><td>1</td><td>Latency makes online combat feel sluggish</td><td>High</td><td>Server-authoritative first, forgiving timing windows, region choice; evaluate prediction or rollback later.</td></tr>
+  <tr><td>2</td><td>Client and server drift apart on combat rules</td><td>High</td><td>Single shared message contract, resolve all hits server-side, integration tests every week.</td></tr>
+  <tr><td>3</td><td>WebSocket idle timeouts or affinity failures on Cloud Run</td><td>Medium</td><td>20 s keepalive, sticky routing, health checks and room expiry.</td></tr>
+  <tr><td>4</td><td>Cloud cost grows with players</td><td>Medium</td><td>Scale-to-zero, small Redis tier, budget alerts, Terraform teardown.</td></tr>
+  <tr><td>5</td><td>Balance issues or exploits</td><td>Medium</td><td>Data-driven stats, combo scaling, wake-up invulnerability, training mode and automated soak tests.</td></tr>
+  <tr><td>6</td><td>Asset licence problems</td><td>Medium</td><td>Use CC0 or clearly licensed packs only; maintain credits.</td></tr>
+  <tr><td>7</td><td>Generated sprites look weaker than hand-drawn art</td><td>Medium</td><td>Stable file names so replacement art drops in without code changes.</td></tr>
+  <tr><td>8</td><td>Schedule slips with a small team</td><td>Medium</td><td>Parallel client and backend tracks, MUST features first, COULD features cut first.</td></tr>
+</table>
+
+<h1>10. Third-party assets</h1>
+<table>
+  <tr><th style="width:26%">Asset</th><th style="width:44%">Source</th><th>Licence</th></tr>
+  <tr><td>Fighter sprites</td><td>Craftpix.net free sprite packs</td><td>Craftpix free licence</td></tr>
+  <tr><td>Music</td><td>OpenGameArt.org (wipics, Kistol, pmiller, Xythe / mutkanto)</td><td>CC0</td></tr>
+  <tr><td>Sound effects and jingles</td><td>Kenney.nl (Impact, Interface, Music Jingles)</td><td>CC0</td></tr>
+  <tr><td>Engine</td><td>Godot Engine</td><td>MIT</td></tr>
+</table>
+
+<h1>11. Acceptance criteria</h1>
+<ol>
+  <li>From a cold start the game reaches the main menu and a VS CPU match begins within 60 seconds with no errors.</li>
+  <li>Every combat action works for both players on keyboard and gamepad; all bindings can be changed and persist.</li>
+  <li>A super can be dodged; its cinematic appears only when the first hit connects; a hit during start-up cancels it.</li>
+  <li>Two players on different machines find each other through matchmaking and finish a full online match with the same rules as local play.</li>
+  <li>Match results appear on the global leaderboard.</li>
+  <li>The backend deploys from scratch with Terraform and scales out under a load test without dropped matches.</li>
+  <li>Automated test suites (gameplay soak, API, WebSocket load) pass on every release build.</li>
+</ol>
+
+<h1>Appendix - Planned default controls</h1>
+<table>
+  <tr><th>Action</th><th>Player 1</th><th>Player 2</th><th>Gamepad</th></tr>
+  <tr><td>Move / Jump</td><td>A D / W</td><td>Left Right / Up</td><td>D-pad or stick / A</td></tr>
+  <tr><td>Attack (tap x3 = combo)</td><td>J</td><td>/ or Numpad 0</td><td>X</td></tr>
+  <tr><td>Heavy attack</td><td>U</td><td>, or Numpad 1</td><td>Y</td></tr>
+  <tr><td>Block / Parry</td><td>S or K</td><td>Down or .</td><td>LB / LT</td></tr>
+  <tr><td>Throw</td><td>Attack + Block</td><td>Attack + Block</td><td>X + LB</td></tr>
+  <tr><td>Super finisher</td><td>I</td><td>M or Numpad 2</td><td>B / RB / RT</td></tr>
+  <tr><td>Dash / Backdash</td><td>Double-tap A / D</td><td>Double-tap Left / Right</td><td>Double-tap D-pad</td></tr>
+  <tr><td>Pause</td><td colspan="2">Esc</td><td>Start</td></tr>
+</table>
+
+<p style="margin-top:24px; color: var(--mute); font-size: 9pt;">End of document - CloudArena BRD v1.0</p>
+</body>
+</html>

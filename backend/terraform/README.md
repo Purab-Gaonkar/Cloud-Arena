@@ -64,3 +64,31 @@ After a successful `terraform apply`, you will see outputs like:
 - `game_server_websocket_url`: The URL to put in your Godot client.
 - `matchmaking_api_url`: The URL for the REST API.
 - `redis_host`: The internal IP of the Redis instance.
+
+## Deploy order (images must exist before the Cloud Run services)
+
+```bash
+cd backend/terraform
+cp terraform.tfvars.example terraform.tfvars        # set project_id
+terraform init
+terraform apply -target=google_project_service.artifactregistry -target=google_artifact_registry_repository.repo
+
+REPO=$(terraform output -raw artifact_registry_repo)
+gcloud auth configure-docker <region>-docker.pkg.dev
+cd ../..                                            # repository root
+docker build -f backend/game_server/Dockerfile -t $REPO/game-server:latest . && docker push $REPO/game-server:latest
+docker build -t $REPO/matchmaking-api:latest backend/matchmaking_api && docker push $REPO/matchmaking-api:latest
+
+cd backend/terraform && terraform apply             # everything else
+terraform output matchmaking_api_url                # enter this in the game's ONLINE menu
+```
+
+### No local Docker? Build on Google Cloud Build instead of step 3
+
+```bash
+REPO=$(cd backend/terraform && terraform output -raw artifact_registry_repo)
+gcloud services enable cloudbuild.googleapis.com
+gcloud builds submit --config backend/cloudbuild-game.yaml --substitutions=_IMAGE=$REPO/game-server:latest .
+gcloud builds submit --tag $REPO/matchmaking-api:latest backend/matchmaking_api
+```
+(Run from the repository root. Cloud Shell has gcloud and terraform preinstalled.)

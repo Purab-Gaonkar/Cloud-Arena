@@ -19,6 +19,7 @@ const SFX: Dictionary = {
 	"swing_light": ["swing_light"],
 	"swing_heavy": ["swing_heavy"],
 	"jump":       ["jump"],
+	"step":       ["step_1", "step_2", "step_3"],
 	"land":       ["land"],
 	"ko":         ["ko", "ko_boom"],
 	"round_bell": ["round_bell"],
@@ -93,7 +94,14 @@ func _load_stream(path: String) -> AudioStream:
 
 # ── SFX ─────────────────────────────────────────────────────────────────────
 
-func play(sound: String, volume_db: float = 0.0, pitch_jitter: float = 0.05) -> void:
+## Set on the dedicated server so gameplay sounds are sent to clients instead of played locally.
+var net_forward: Callable = Callable()
+
+
+func play(sound: String, volume_db: float = 0.0, pitch_jitter: float = 0.05, local_only: bool = false) -> void:
+	if net_forward.is_valid() and not local_only:
+		net_forward.call(sound, volume_db)
+		return
 	var variants: Array = SFX.get(sound, [])
 	if variants.is_empty():
 		return
@@ -160,6 +168,17 @@ func duck(db: float, seconds: float) -> void:
 	_duck_tween = create_tween().set_ignore_time_scale(true)
 	_duck_tween.tween_interval(seconds)
 	_duck_tween.tween_method(func(v: float) -> void: AudioServer.set_bus_volume_db(idx, v), base + db, base, 0.6)
+
+
+## Subtle tension: music plays a touch faster while a fighter is nearly KO'd (1.0 = normal).
+func set_music_pitch(p: float) -> void:
+	for m in _music:
+		m.pitch_scale = lerpf(m.pitch_scale, p, 0.05)
+
+
+func reset_pitch() -> void:
+	for m in _music:
+		m.pitch_scale = 1.0
 
 
 ## Dramatic slow-motion for the audio itself (1.0 = normal).

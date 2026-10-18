@@ -1,38 +1,37 @@
-# ── Game Server — Dockerfile ─────────────────────────────────────────────────
-# Multi-stage build: compile dependencies in builder, copy to slim runtime image.
+# -- Game host: Python room manager + headless Godot dedicated servers ----------
+# Build from the REPOSITORY ROOT (the Godot project is part of the image):
+#   docker build -f backend/game_server/Dockerfile -t cloud-arena/game-server .
+FROM python:3.12-slim
 
-# ── Stage 1: Builder ──────────────────────────────────────────────────────────
-FROM python:3.12-slim AS builder
+ARG GODOT_VERSION=4.7.1-stable
+ENV DEBIAN_FRONTEND=noninteractive
 
-WORKDIR /app
+# Libraries the (headless) Godot binary still links against
+RUN apt-get update && apt-get install -y --no-install-recommends         ca-certificates curl unzip libfontconfig1 libx11-6 libxcursor1 libxinerama1         libxrandr2 libxi6 libgl1 libasound2 libpulse0 &&     rm -rf /var/lib/apt/lists/*
 
-# Install build tools (needed for some native wheels)
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
-    rm -rf /var/lib/apt/lists/*
+# Godot Linux build (the same binary also acts as the dedicated server runtime)
+RUN curl -fsSL -o /tmp/godot.zip         "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip" &&     unzip -q /tmp/godot.zip -d /opt &&     mv /opt/Godot_v${GODOT_VERSION}_linux.x86_64 /usr/local/bin/godot &&     chmod +x /usr/local/bin/godot && rm /tmp/godot.zip
 
-COPY requirements.txt .
-RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
+RUN groupadd -r cloudapp && useradd -r -m -g cloudapp cloudapp
+ENV HOME=/home/cloudapp
 
+# The game project (see .dockerignore for what is left out)
+WORKDIR /game
+COPY project.godot export_presets.cfg icon.svg ./
+COPY scenes ./scenes
+COPY scripts ./scripts
+COPY assets ./assets
+# Bake Godot's import cache so servers start in about a second instead of re-importing assets
+RUN godot --headless --path /game --import || true
+RUN chown -R cloudapp:cloudapp /game
 
-# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+# Room manager
+WORKDIR /srv
+COPY backend/game_server/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/game_server/server.py .
 
-# Non-root user for security
-RUN groupadd -r cloudapp && useradd -r -g cloudapp cloudapp
-
-WORKDIR /app
-
-# Copy installed packages from builder
-COPY --from=builder /install /usr/local
-
-# Copy source code
-COPY server.py .
-
-# Health probe path
+ENV GODOT_BIN=/usr/local/bin/godot     GODOT_PROJECT=/game     PORT=8765
 EXPOSE 8765
-EXPOSE 8766
-
 USER cloudapp
-
-# Start the server
 CMD ["python", "-u", "server.py"]

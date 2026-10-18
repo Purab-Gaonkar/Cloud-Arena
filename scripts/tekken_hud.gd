@@ -8,8 +8,7 @@ const UiStyle  := preload("res://scripts/ui_style.gd")
 const HudBar   := preload("res://scripts/hud_bar.gd")
 const FighterData := preload("res://scripts/fighter_data.gd")
 
-const ROUND_SECONDS: float = 99.0
-const PIPS_TO_WIN:   int   = 2
+const PIPS_MAX: int = 3
 const SIDE_W:        float = 560.0
 
 var _bars:      Array = [null, null]
@@ -24,9 +23,11 @@ var _timer_label: Label
 var _timer_ring:  Panel
 var _round_label: Label
 var _announcer:   Label
+var _training_label: Label
 var _band:        ColorRect
 
-var _round_time: float = ROUND_SECONDS
+var _round_seconds: float = 99.0   # 0 = no limit
+var _round_time: float = 99.0
 var _last_sec: int = 99
 var _match_ended: bool = false
 var _round_running: bool = false
@@ -38,7 +39,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if _round_running and not _match_ended and _round_time > 0.0:
+	if _round_running and not _match_ended and _round_time > 0.0 and _round_seconds > 0.0:
 		_round_time -= delta
 		if _round_time <= 0.0:
 			_round_time = 0.0
@@ -50,6 +51,7 @@ func _process(delta: float) -> void:
 		if sec != _last_sec:
 			_last_sec = sec
 			if sec <= 10:
+				AudioManager.play("ui_move", -3.0, 0.0)
 				_timer_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.25))
 				_timer_label.pivot_offset = _timer_label.size * 0.5
 				_timer_label.scale = Vector2(1.35, 1.35)
@@ -141,12 +143,14 @@ func _build_side(i: int) -> void:
 	meter.skew = 10.0
 	meter.accent = UiStyle.GOLD_DARK
 	meter.meter_color = accent
+	meter.value = 0.0
+	meter.ghost = 0.0
 	meter.position = Vector2(bar_x + (0.0 if right else 72.0), 72)
 	meter.size = Vector2(meter_w, 18)
 	root.add_child(meter)
 	_meters[i] = meter
 
-	for k in range(PIPS_TO_WIN):
+	for k in range(PIPS_MAX):
 		var pip := Panel.new()
 		pip.size = Vector2(16, 16)
 		pip.pivot_offset = Vector2(8, 8)
@@ -234,8 +238,30 @@ func set_training() -> void:
 	_round_label.text = "TRAINING"
 
 
+func set_training_info(txt: String) -> void:
+	if _training_label == null:
+		_training_label = UiStyle.label("", 22, UiStyle.TEXT, true, 6)
+		_training_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+		_training_label.position = Vector2(-380, 142)
+		_training_label.size = Vector2(760, 60)
+		_training_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		add_child(_training_label)
+	_training_label.text = txt
+
+
 func set_round_text(txt: String) -> void:
 	_round_label.text = txt
+
+
+## Match rules from GameSettings: rounds needed to win (hides spare pips) and the round clock (0 = none).
+func configure_rules(rounds_to_win: int, round_seconds: int) -> void:
+	_round_seconds = float(round_seconds)
+	_round_time = _round_seconds
+	for side in _pips:
+		for k in range(side.size()):
+			side[k].visible = k < rounds_to_win
+	if _timer_label:
+		_timer_label.text = str(round_seconds) if round_seconds > 0 else "--"
 
 
 func set_round(n: int) -> void:
@@ -278,13 +304,13 @@ func start_clock() -> void:
 func reset_round() -> void:
 	_match_ended = false
 	_round_running = false
-	_round_time = ROUND_SECONDS
+	_round_time = _round_seconds
 	_last_sec = 99
 	for b in _bars:
 		b.reset()
 	for m in _meters:
 		m.reset()
-	_timer_label.text = str(int(ROUND_SECONDS))
+	_timer_label.text = str(int(_round_seconds)) if _round_seconds > 0.0 else "--"
 	_timer_label.add_theme_color_override("font_color", UiStyle.GOLD)
 	clear_announcement()
 

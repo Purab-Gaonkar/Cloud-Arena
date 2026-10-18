@@ -1,0 +1,8 @@
+# Builds the game-host image on Google Cloud Build (run from the repository root):
+#   gcloud builds submit --config backend/cloudbuild-game.yaml --substitutions=_IMAGE=REGION-docker.pkg.dev/PROJECT/cloud-arena/game-server:latest .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "backend/game_server/Dockerfile", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]
+options:
+  machineType: E2_HIGHCPU_8

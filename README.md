@@ -6,9 +6,11 @@
 
 ## 🎮 Highlights
 
-- **Dual Game Modes**:
-  - **Local 2-Player**: Play head-to-head on a single keyboard / mouse (`WASD + J` vs `Arrow Keys + Numpad 0`).
-  - **Online Cloud Multiplayer**: Real-time networked combat powered by Godot's `WebSocketMultiplayerPeer` with server-authoritative physics and state replication.
+- **Game Modes**:
+  - **VS CPU / Local 2-Player / Training**: three fighters (Brawler, Samurai, Shinobi), best-of-3 rounds, three stages.
+  - **Online Cloud Multiplayer** *(backend ready, client integration in progress)*: real-time networked combat powered by Godot's `WebSocketMultiplayerPeer` with server-authoritative physics and state replication.
+- **Combat**: 3-hit combos, heavy attacks, blocking with chip damage, throws (attack + block), dash / invulnerable backdash, and a super meter with a cinematic finisher per fighter.
+- **Presentation**: animated menu and loading screen, layered parallax stages with foreground depth, generated FX sprites, music and SFX (CC0), full controller support and rebindable controls.
 - **Tekken-Style Presentation**:
   - Dual mirrored health bars with gold-beveled framing.
   - Smoothly draining **red damage ghost lag bars**.
@@ -27,7 +29,19 @@
 ### 1. Run the Game (Godot 4.3+)
 - Open this repository folder in **Godot Engine 4.x**.
 - Press **F5** to run `scenes/main.tscn`.
-- Choose **LOCAL PLAY** to jump into combat immediately, or enter your backend API URL for **MATCHMAKE**.
+- Choose **VS CPU**, **LOCAL 2P** or **TRAINING** to fight immediately, or use **ONLINE** with your backend API URL.
+
+#### Default controls (rebindable in *Controls*; gamepads work out of the box)
+| Action | Player 1 | Player 2 | Gamepad |
+|---|---|---|---|
+| Move / Jump | `A` `D` / `W` | `←` `→` / `↑` | D-pad or stick / `A` |
+| Attack (tap x3 = combo) | `J` | `/` or Numpad 0 | `X` |
+| Heavy attack | `U` | `,` or Numpad 1 | `Y` |
+| Block | `S` / `K` | `↓` / `.` | `LB` / `LT` |
+| Throw | Attack + Block | Attack + Block | `X` + `LB` |
+| Super finisher (full meter) | `I` | `M` or Numpad 2 | `B` / `RB` |
+| Dash / backdash | double-tap `A`/`D` | double-tap `←`/`→` | double-tap D-pad |
+| Pause | `Esc` | `Esc` | `Start` |
 
 ### 2. Run the Cloud Backend Locally (Docker)
 ```bash

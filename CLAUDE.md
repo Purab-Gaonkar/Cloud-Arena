@@ -296,7 +296,7 @@ chmod +x cloud-run/deploy_cloudrun.sh
 
 - **Controls**: heavy = `U` (P1) / `,` or Numpad 1 (P2); super finisher = `I` (P1) / `M` or Numpad 2 (P2). Super needs a full meter (fills from dealing/taking damage; resets each round).
 - **States** `HEAVY=6`, `SUPER=7` were appended to the `State` enum in `scripts/player_controller.gd` (keep existing values stable for networking). `meter` is an exported property; add it to the MultiplayerSynchronizer config when online play is built.
-- **Super moves** are data in `FighterData.ROSTER[...]["super"]` (dash segments, teleports, timed hits). `game_manager.super_cinematic()` runs the freeze-frame intro, then calls `begin_super_strike()` on the fighter.
+- **Super moves** are data in `FighterData.ROSTER[...]["super"]` (dash segments, teleports, timed hits). The super has a 0.45s telegraphed startup (`SUPER_STARTUP`, attacker can be hit and cancelled), then lunges via `begin_super_strike()`; `game_manager.super_cinematic()` (freeze-frame banner) only fires when the first hit actually connects, so the defender can dodge (backdash, jump, block-proof only by evasion). `receive_hit` now returns bool (connected or not).
 - **Generated art**: `python tools/gen_sprites.py` (needs `pip install pillow numpy`) rebuilds `assets/generated/` - derived Heavy/Super strips per fighter plus FX sheets (slashes, impact, shockwave, aura, speed lines...). Hand-drawn replacements can use the same file names/frame sizes (`FighterData.FX`). Spawn FX with `FxSprite.spawn()` (`scripts/fx_sprite.gd`).
 - **Audio**: `AudioManager` autoload (`scripts/audio_manager.gd`) - music crossfades, pooled SFX, Music/SFX buses, volume sliders saved to `user://settings.cfg`. Logical names map to files in `assets/audio/` (all CC0, see `assets/audio/CREDITS.md`). Missing files are skipped silently.
 
@@ -318,3 +318,55 @@ chmod +x cloud-run/deploy_cloudrun.sh
 - **Dash**: double-tap left/right (`_detect_dash` in `player_controller.gd`, local mode only for now). Dashing away from the opponent is a backdash with `BACKDASH_IFRAMES` of invulnerability. `State.DASH=8`.
 - **Training mode** (Main menu > TRAINING): P2 is a dummy (`is_dummy`), meter stays full, health refills below 45, no clock/rounds. Driven by root meta `training`.
 - **Match stats**: `game_manager.stat_hit/stat_super` collect damage, best combo, supers; shown on the victory screen (`overlay_menu.show_match_end(text, stats)`). Rounds announce `PERFECT!` for flawless wins and `FINAL ROUND` for the decider. The pause screen lists the move set.
+
+
+---
+
+## 11. Rules, polish and testing notes
+
+- **Throw**: ATTACK + BLOCK pressed together up close (`_try_throw`), unblockable 14 dmg launcher; the CPU throws blockers. **Combo damage scaling** (-10% per extra hit, floor 50%) and **wake-up invulnerability** (0.35s after a heavy knockdown) are in `receive_hit` / `_state_hit`.
+- **Match rules** live in `GameSettings` (rounds to win 1-3, round time 99/60/30/none, CPU difficulty, shake, fullscreen, foreground blur); `game_manager.rounds_to_win` and `tekken_hud.configure_rules()` consume them.
+- **Stages**: 4 (`FROZEN SHRINE` added, with snow). Each stage has an `actor_tint` that colours fighters to sit in the scene; fighters also get a faint floor reflection (`_refl` in `player_controller.gd`).
+- **Audio extras**: footsteps on run frames, music pitch rises slightly when a fighter is nearly KO'd. Credits modal on the main menu (bottom-right).
+- **Headless scene switches** from `_ready` must use `change_scene_to_file.call_deferred(...)` (done in `loading_screen.gd` and `main_menu.gd` for dedicated-server mode).
+- **Testing recipe** (no test framework): write a throwaway `extends SceneTree` script, set root metas (`local_mode`, `vs_cpu`, `p1_char`, `p2_char`, `stage`, `training`), `change_scene_to_file("res://scenes/game.tscn")`, then drive the game and print state; run with `godot --headless --path . --script file.gd`. For screenshots drop `--headless` and save `root.get_texture().get_image()`. A CPU-vs-CPU soak (`is_cpu = true` on both) and random-input fuzz both complete a full match without script errors.
+- **Palettes**: `FighterData.palette_material(i)` hue-shifts a sprite (4 palettes); players pick with `heavy` on the select screen (`p1_pal`/`p2_pal` metas). Mirror matches auto-recolour P2.
+- **Training dummy**: `dummy_cycle` action (Tab / R3) switches STAND / BLOCK / FIGHT BACK; the HUD shows last hit, combo count and combo damage.
+
+- **Parry / counter / popups**: blocking within `PARRY_WINDOW` (0.14s) of impact negates the hit, staggers the attacker and gives meter. Hitting an opponent during their attack startup is a COUNTER (+25%). `game_manager.popup_text()` shows damage numbers, PARRY!, COUNTER! and super names in the arena.
+
+
+---
+
+## 12. Online multiplayer (implemented)
+
+- **Architecture**: headless Godot dedicated servers (one match per process) managed by the Python room manager (`backend/game_server/server.py`); the matchmaking API (`backend/matchmaking_api/main.py`) reserves slots / asks hosts to create rooms. See `backend/README.md`. The old shooter-style Python game server is gone.
+- **Client flow**: Main menu ONLINE (API url + name) -> character select (online mode, fighter + palette only) -> `NetworkManager.matchmake()` -> `join_game(ws_url)` -> `game.tscn`. `game_manager` (`_online`, `_is_dedicated`) registers the fighter with `Net.register`, waits for `net_start`, then just renders replicated state.
+- **Server flow**: `scripts/online_match.gd` (child node `Net` of the game scene, same RPC set on every peer) accepts 2 peers, builds the match (`gm.online_build_match`), then the normal round flow runs on the server. HUD calls go through `hud_proxy.gd` (applied locally + forwarded with `net_hud`); cosmetic effects are forwarded with `net_call`; gameplay sounds via `AudioManager.net_forward` -> `net_sfx`. Time is never slowed online (no `Engine.time_scale`).
+- **Replication** (`scenes/player.tscn`): position, velocity, health, state, facing, meter, combo step, super phase, attack duration, dash flag; spawn-only: char, palette, index, tint, local_mode. Clients only send inputs (`send_input` incl. dash). Fighter authority is set in `_enter_tree` (required by MultiplayerSynchronizer).
+- **Lifecycle**: server prints `@@ROOM {json}` lines (ready, player_joined, match_started, match_over, closed), exits when all players leave / nobody joined in time, forfeits to the remaining player on disconnect, rematch needs both players. Results POST to `/stats/result`.
+- **Testing**: `python backend/dev_stack.py` (no Docker/Redis) + headless bots (`--client --matchmake=URL --bot`); direct: `godot --headless --path . -- --server --port=7031 --room=x --rounds=1 --time=12` and bots with `--join=ws://127.0.0.1:7031`.
+- **Not done / limits**: no client-side prediction (input delay = RTT), reconnect only within the 30 s grace period (section 14), Terraform/Docker files are untested here, stage and arena are server-chosen.
+
+
+---
+
+## 13. Main menu (dark, text-only)
+
+- `scripts/main_menu.gd` is a small page system: **root** (Play / Settings / Quit) -> **play** (Versus CPU, Two Players, Training, Online) and **settings** (Audio, Video, Gameplay, Controls, Credits); online and leaderboard are sub-pages of Play. Pages cross-fade (`_push` / `_back`, Esc / B steps back); the title shrinks on deep pages (`COMPACT_PAGES`). Add a page by writing `_page_xxx()` and registering it in `_build_page`.
+- `scripts/hk_menu_list.gd` is the text-only list control (plain, value and slider rows; focus = brighter text + faint glow + thin underline + side crests; keyboard, pad via `ui_*` actions, and mouse). `scripts/menu_atmosphere.gd` is the backdrop (gradient, ridges with mouse parallax, vines, fog banks, dust motes, vignette). Serif fonts and `minimal_button` live in `ui_style.gd`.
+- The only text outside the pages is the game title; no version/sub-header/branding strings. The controls rebinding panel was re-skinned to the same minimal style.
+
+
+---
+
+## 14. Accounts (online play)
+
+- Online requires an account. `Account` autoload (`scripts/account.gd`) stores username + session token in `user://account.cfg` (never the password); the Online menu page shows Server/Name/Password + Sign In/Create Account, or Find Match/Leaderboard/Sign Out when signed in.
+- API: `/auth/register|login|logout|me`, `/match/join` (Bearer token -> room, ws_url, one-time `ticket`), `/auth/ticket/redeem` and `/stats/result` (need `X-Server-Key` = `SERVER_KEY`). scrypt password hashes, hashed session tokens in Redis, rate limits.
+- The client sends the ticket in `online_match.register`; the dedicated server redeems it to get the verified username (no ticket = kicked, `auth_rejected`). One account cannot fill both slots.
+- Bots: `--user=NAME --pass=PW` (account is created on first use). `SERVER_KEY` is wired into docker-compose (`backend/.env`) and Terraform. Limits: needs HTTPS and durable Redis in production; no password reset/email verification.
+- **Firestore (optional)**: with `FIRESTORE_PROJECT_ID` set, the API mirrors accounts (`players/`) and writes match history (`matches/`) in background tasks (sign-up, post-match); login restores an account into Redis if it is missing. Never touched mid-match. Redis can be configured via `REDIS_HOST`/`REDIS_PORT`. Firestore code is untested here (needs credentials or the emulator).
+
+- **Reconnect grace (30 s)**: when a client drops mid-match, `online_match.gd` keeps its slot (`held`, regs/order untouched), freezes the whole simulation with `get_tree().paused` (`gm.online_freeze`; `Net` and `NetworkManager` run `PROCESS_MODE_ALWAYS`; `NetworkManager.hold_active` stops the server quitting), and counts down "OPPONENT DISCONNECTED n" on the other client (`net_status`). The dropped client (`game_manager._reconnect_loop`) frees its fighter nodes, calls `POST /match/rejoin` (Bearer; needs room status `playing` and the account in `room:<id>:users`; returns a fresh ticket) via `NetworkManager.try_rejoin()`, reconnects through the relay, re-registers, and the server re-binds the new peer id to the slot (`_rebind` -> `net_resume`), then unfreezes. After 30 s `_expire_slot` forfeits to the player who stayed. Fighters are named `P0`/`P1` (not peer ids); `owning_peer_id` is set by the server and, on clients, from `info["peers"]`.
+- Tested on the dev stack: bot flag `--drop-at=SECONDS` (`NetworkManager.simulate_drop()`) drops and reconnects mid-match (`@@BOT resumed`, match finishes normally); killing a bot process forfeits to the other player after ~30 s. Not tested: both players dropping at once, drops during the round intro, real network loss (relay-level).

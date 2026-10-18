@@ -1,0 +1,9 @@
+.git
+*.exe
+*.pck
+*.zip
+docs/
+backend/terraform/.terraform/
+backend/terraform/*.tfstate*
+backend/terraform/terraform.tfvars
+backend/.env

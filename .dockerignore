@@ -1,0 +1,11 @@
+.git
+.godot
+docs
+backend
+tools
+*.exe
+*.pck
+*.zip
+assets/craftpix/PSD
+assets/craftpix/COUPON*
+**/__pycache__

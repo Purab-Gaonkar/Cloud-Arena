@@ -184,6 +184,7 @@ func _register_fixed_actions() -> void:
 	_fixed("ov_menu",    [KEY_M], [{"t": "b", "i": 1}, {"t": "b", "i": 4}])
 	_fixed("stage_next", [KEY_TAB], [{"t": "b", "i": 10}])
 	_fixed("stage_prev", [], [{"t": "b", "i": 9}])
+	_fixed("dummy_cycle", [KEY_TAB], [{"t": "b", "i": 8}])
 
 
 func _fixed(act: String, keys: Array, pads: Array) -> void:
@@ -219,6 +220,16 @@ func _load() -> void:
 			var keys = cfg.get_value(sec, id + "_keys", null)
 			var pads = cfg.get_value(sec, id + "_pads", null)
 			if keys is Array:
-				bindings[p][id]["keys"] = keys
+				var clean_keys: Array = []
+				for k in keys:
+					if k is int and k > 0:
+						clean_keys.append(k)
+				bindings[p][id]["keys"] = clean_keys
 			if pads is Array:
-				bindings[p][id]["pads"] = pads
+				var clean_pads: Array = []
+				for pd in pads:
+					if pd is Dictionary and pd.get("t") == "b" and pd.has("i"):
+						clean_pads.append(pd)
+					elif pd is Dictionary and pd.get("t") == "a" and pd.has("axis") and pd.has("dir"):
+						clean_pads.append(pd)
+				bindings[p][id]["pads"] = clean_pads

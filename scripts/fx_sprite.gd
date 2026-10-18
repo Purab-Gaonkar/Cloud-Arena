@@ -7,7 +7,7 @@ const FighterData := preload("res://scripts/fighter_data.gd")
 static var _shared_frames: SpriteFrames
 
 
-static func spawn(parent: Node, fx_name: String, pos: Vector2, facing: int = 1, tint: Color = Color.WHITE, fx_scale: float = 1.0) -> AnimatedSprite2D:
+static func spawn(parent: Node, fx_name: String, pos: Vector2, facing: int = 1, tint: Color = Color.WHITE, fx_scale: float = 1.0, lifetime: float = 0.0) -> AnimatedSprite2D:
 	if _shared_frames == null:
 		_shared_frames = FighterData.build_fx_frames()
 	if not _shared_frames.has_animation(fx_name):
@@ -24,4 +24,9 @@ static func spawn(parent: Node, fx_name: String, pos: Vector2, facing: int = 1, 
 	fx.play(fx_name)
 	if not _shared_frames.get_animation_loop(fx_name):
 		fx.animation_finished.connect(fx.queue_free)
+	elif lifetime > 0.0:
+		# Looping effects (flames, speed lines) must be given a lifetime or they would never go away.
+		var tw := fx.create_tween()
+		tw.tween_property(fx, "modulate:a", 0.0, minf(0.2, lifetime * 0.4)).set_delay(lifetime * 0.6)
+		tw.tween_callback(fx.queue_free)
 	return fx
