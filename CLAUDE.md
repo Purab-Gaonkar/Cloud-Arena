@@ -44,7 +44,6 @@
 | **Load Balancer** | NGINX 1.27 Alpine | Sticky session reverse proxy for WebSockets (`ip_hash`), load balances API (`least_conn`) | `backend/nginx/nginx.conf` |
 | **State Store** | Redis 7 (Alpine / Memorystore) | Matchmaking queue (`queue:matchmaking`), room metadata, win leaderboards | `backend/docker-compose.yml` |
 | **Infrastructure** | Terraform 1.5+, GCP Cloud Run v2 | Declarative GCP provisioning: Cloud Run, Redis Memorystore, VPC connector, Artifact Registry | `backend/terraform/` |
-| **Deployment Script**| Bash / gcloud CLI | Quickstart deployment script for building & pushing Docker images to Cloud Run | `backend/cloud-run/deploy_cloudrun.sh` |
 
 ---
 
@@ -98,15 +97,7 @@ cloud-arena/
 │   │   ├── outputs.tf             # Service URLs, Redis host IP
 │   │   └── terraform.tfvars.example
 │   │
-│   └── cloud-run/                 # GCP Cloud Run deployment utilities
-│       ├── deploy_cloudrun.sh     # Automated build, push, and deploy script
-│       ├── game-server.yaml       # Knative service specification
-│       └── matchmaking-api.yaml   # Knative service specification
 │
-├── generate_fighter_sprites.py    # Offline utility: generates procedural fighter sprite frames
-├── assets_generator.py            # Offline utility: generates SVG background & platform assets
-├── test_server.py                 # Standalone legacy Python test server (reference prototype)
-└── [Legacy Root Scripts]          # GameManager.gd, NetworkManager.gd, Player.gd (superseded by scripts/)
 ```
 
 ---
@@ -243,12 +234,6 @@ Outputs from Terraform will provide:
 - `matchmaking_api_url`
 - `redis_host`
 
-#### Option B: Automated Bash Script
-```bash
-cd backend/
-chmod +x cloud-run/deploy_cloudrun.sh
-./cloud-run/deploy_cloudrun.sh <PROJECT_ID> <REGION> <REDIS_HOST>
-```
 
 ---
 
