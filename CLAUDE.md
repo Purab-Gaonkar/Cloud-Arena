@@ -93,7 +93,7 @@ cloud-arena/
 │   │
 │   ├── terraform/                 # GCP Infrastructure as Code
 │   │   ├── main.tf                # Cloud Run services, Memorystore Redis, VPC network, Artifact Registry
-│   │   ├── variables.tf           # Project ID, region (default us-central1), environment
+│   │   ├── variables.tf           # Project ID, region (default asia-south1), environment
 │   │   ├── outputs.tf             # Service URLs, Redis host IP
 │   │   └── terraform.tfvars.example
 │   │

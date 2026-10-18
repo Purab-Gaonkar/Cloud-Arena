@@ -4,9 +4,9 @@ variable "project_id" {
 }
 
 variable "region" {
-  description = "The GCP region for the resources (e.g., us-central1)"
+  description = "The GCP region for the resources (default asia-south1 = Mumbai)"
   type        = string
-  default     = "us-central1"
+  default     = "asia-south1"
 }
 
 variable "game_host_count" {

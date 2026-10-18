@@ -13,7 +13,8 @@ var rounds_to_win: int = 2
 var round_time_index: int = 0
 var fg_blur: bool = true
 var seen_tips: bool = false
-const DEFAULT_API: String = "https://cloud-arena-matchmaking-api-uqc74rpzbq-uc.a.run.app"
+const DEFAULT_API: String = "https://cloud-arena-matchmaking-api-qg4vz3e4va-uc.a.run.app"
+const RETIRED_APIS: Array = ["https://cloud-arena-matchmaking-api-uqc74rpzbq-uc.a.run.app"]
 var online_api: String = DEFAULT_API
 var player_name: String = ""
 
@@ -31,7 +32,7 @@ func _ready() -> void:
 		seen_tips = bool(cfg.get_value("game", "seen_tips", seen_tips))
 		online_api = str(cfg.get_value("online", "api", online_api))
 		online_api = Account.clean_url(online_api)
-		if online_api == "http://127.0.0.1:8000":   # old local-dev default saved by earlier versions
+		if online_api == "http://127.0.0.1:8000" or online_api in RETIRED_APIS:   # old defaults saved by earlier versions
 			online_api = DEFAULT_API
 		player_name = str(cfg.get_value("online", "name", player_name))
 	_apply_fullscreen()

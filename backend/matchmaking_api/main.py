@@ -299,19 +299,7 @@ async def _pick_server() -> str | None:
     return best
 
 
-async def _create_room(username: str) -> dict:
-    server_id = await _pick_server()
-    if server_id is None:
-        raise HTTPException(status_code=503, detail="No game servers available")
-    room_id = uuid.uuid4().hex[:8]
-    await redis_client.hset(f"room:{room_id}", mapping={
-        "room_id": room_id, "server_id": server_id, "status": "creating", "reserved": 1, "player_cnt": 0,
-        "created_at": datetime.now(timezone.utc).isoformat()})
-    await redis_client.expire(f"room:{room_id}", 120)
-    await redis_client.sadd(f"room:{room_id}:users", username)
-    await redis_client.expire(f"room:{room_id}:users", 3600)
-    await redis_client.lpush(f"queue:create:{server_id}", room_id)
-
+async def _wait_room_open(room_id: str) -> dict:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + ROOM_CREATE_TIMEOUT
     while loop.time() < deadline:
@@ -323,6 +311,45 @@ async def _create_room(username: str) -> dict:
             raise HTTPException(status_code=503, detail=f"Room creation failed: {meta.get('error')}")
         await asyncio.sleep(0.2)
     raise HTTPException(status_code=504, detail="Timed out waiting for a room to start")
+
+
+async def _join_creating_room(username: str) -> dict | None:
+    """A room that is still booting already has one player; a second player takes the other slot
+    instead of starting a second room (cold starts take several seconds)."""
+    for room_id in await redis_client.lrange("queue:creating", 0, 9):
+        meta = await redis_client.hgetall(f"room:{room_id}")
+        if not meta or meta.get("status") != "creating":
+            await redis_client.lrem("queue:creating", 0, room_id)
+            continue
+        if await redis_client.sismember(f"room:{room_id}:users", username):
+            continue
+        reserved = await redis_client.hincrby(f"room:{room_id}", "reserved", 1)
+        if reserved > 2:
+            await redis_client.hincrby(f"room:{room_id}", "reserved", -1)
+            continue
+        await redis_client.sadd(f"room:{room_id}:users", username)
+        await redis_client.expire(f"room:{room_id}:users", 3600)
+        return await _wait_room_open(room_id)
+    return None
+
+
+async def _create_room(username: str) -> dict:
+    server_id = await _pick_server()
+    if server_id is None:
+        raise HTTPException(status_code=503, detail="No game servers available")
+    room_id = uuid.uuid4().hex[:8]
+    await redis_client.hset(f"room:{room_id}", mapping={
+        "room_id": room_id, "server_id": server_id, "status": "creating", "reserved": 1, "player_cnt": 0,
+        "created_at": datetime.now(timezone.utc).isoformat()})
+    await redis_client.expire(f"room:{room_id}", 120)
+    await redis_client.sadd(f"room:{room_id}:users", username)
+    await redis_client.expire(f"room:{room_id}:users", 3600)
+    await redis_client.lpush("queue:creating", room_id)
+    await redis_client.lpush(f"queue:create:{server_id}", room_id)
+    try:
+        return await _wait_room_open(room_id)
+    finally:
+        await redis_client.lrem("queue:creating", 0, room_id)
 
 
 @app.get("/health")
@@ -353,7 +380,7 @@ async def join_match(req: JoinRequest, username: str = Depends(current_user)):
             await redis_client.hincrby(f"room:{req.preferred_room}", "reserved", 1)
             await redis_client.sadd(f"room:{req.preferred_room}:users", username)
             return await _issue_ticket(username, _room_response(meta))
-    room = await _claim_open_room(username) or await _create_room(username)
+    room = await _claim_open_room(username) or await _join_creating_room(username) or await _create_room(username)
     return await _issue_ticket(username, room)
 
 

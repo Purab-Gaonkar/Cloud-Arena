@@ -131,6 +131,7 @@ func _ready() -> void:
 	collision_mask  = 1
 	_sprite.scale           = Vector2(SPRITE_SCALE, SPRITE_SCALE)
 	_sprite.position        = Vector2(0.0, BODY_SIZE.y * 0.5 - (FighterData.FRAME_SIZE - 0.5 - 64.0) * SPRITE_SCALE)
+	_sprite_base            = _sprite.position
 	_sprite.texture_filter  = CanvasItem.TEXTURE_FILTER_NEAREST
 
 	# Faint mirror image on the polished floor.
@@ -168,8 +169,21 @@ func _apply_fighter() -> void:
 
 
 ## True on peers that run the combat simulation (local game or the dedicated server).
+var _sprite_base: Vector2 = Vector2.ZERO
+var _smooth_off: Vector2 = Vector2.ZERO
+var _last_net_pos: Vector2 = Vector2.ZERO
+
+
 func _is_sim() -> bool:
 	return local_mode or multiplayer.is_server()
+
+
+## Visual "on the ground" test. Remote clients never run physics, so is_on_floor() is always false
+## there; they use the replicated height instead.
+func _grounded() -> bool:
+	if _is_sim():
+		return is_on_floor()
+	return FLOOR_Y - global_position.y - BODY_SIZE.y * 0.5 < 4.0
 
 
 ## Per-instance collision shapes so size tweaks never leak between fighters.
@@ -862,13 +876,24 @@ func _notify_scene(method: String, args: Array) -> void:
 
 
 func _update_visuals() -> void:
+	# Remote clients receive position in discrete network steps; absorb each step into a visual offset
+	# that eases back to zero so motion looks continuous instead of stepping.
+	if not _is_sim():
+		var step := position - _last_net_pos
+		_last_net_pos = position
+		if step.length() > 300.0:
+			_smooth_off = Vector2.ZERO
+		else:
+			_smooth_off -= step
+		_smooth_off = _smooth_off.lerp(Vector2.ZERO, 1.0 - exp(-get_process_delta_time() * 14.0))
+		_sprite.position = _sprite_base + _smooth_off
 	if char_id != _built_char or palette != _built_pal or tint != _built_tint:
 		_apply_fighter()
 	var entered_state := current_state != _prev_vis_state
 	_prev_vis_state = current_state
 	_sprite.flip_h = (facing_direction == -1)
 	# Footsteps on the run cycle's contact frames.
-	if _sprite.animation == "run" and current_state == State.MOVE and is_on_floor():
+	if _sprite.animation == "run" and current_state == State.MOVE and _grounded():
 		var f := _sprite.frame
 		if f != _last_run_frame and (f == 1 or f == 5):
 			AudioManager.play("step", -14.0, 0.12, true)
@@ -882,7 +907,7 @@ func _update_visuals() -> void:
 		_refl.position = Vector2(_sprite.position.x, 2.0 * (FLOOR_Y - global_position.y) - _sprite.position.y)
 		_refl.visible = current_state != State.KO or true
 	_sprite.speed_scale = 0.0 if _hitstop > 0.0 else 1.0
-	var airborne := not is_on_floor()
+	var airborne := not _grounded()
 
 	match current_state:
 		State.KO:
