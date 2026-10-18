@@ -15,7 +15,7 @@ extends Node
 const DEFAULT_PORT: int = 7000
 const MAX_PLAYERS: int = 2
 const PING_INTERVAL_SEC: float = 20.0
-const MATCHMAKE_TIMEOUT_SEC: float = 25.0
+const MATCHMAKE_TIMEOUT_SEC: float = 50.0
 const GAME_SCENE: String = "res://scenes/game.tscn"
 
 signal network_ready
@@ -71,7 +71,7 @@ func _ready() -> void:
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 
 	_http = HTTPRequest.new()
-	_http.timeout = 10.0
+	_http.timeout = 45.0
 	add_child(_http)
 	_http.request_completed.connect(_on_matchmake_response)
 

@@ -127,10 +127,6 @@ resource "google_cloud_run_v2_service" "game_host" {
         value = "redis://${google_redis_instance.redis.host}:${google_redis_instance.redis.port}"
       }
       env {
-        name  = "PORT"
-        value = "8765"
-      }
-      env {
         name  = "SERVER_ID"
         value = local.game_host_names[count.index]
       }

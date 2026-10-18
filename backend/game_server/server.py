@@ -172,6 +172,9 @@ class Manager:
             await self.redis.hset(f"room:{room_id}", mapping={"status": "failed", "error": "server_full"})
             log("warn", "room_rejected_full", room=room_id)
             return
+        for var in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"):
+            if os.environ.get(var):
+                os.makedirs(os.environ[var], exist_ok=True)      # Godot needs its user dirs to exist
         self.used_ports.add(port)
         room = Room(room_id, port)
         self.rooms[room_id] = room

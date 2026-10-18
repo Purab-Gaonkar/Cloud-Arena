@@ -144,7 +144,7 @@ func _push(id: String) -> void:
 	if _busy:
 		return
 	_stack.append(id)
-	_show_page(id)
+	await _show_page(id)
 
 
 func _back() -> void:
@@ -485,7 +485,7 @@ func _page_online() -> Dictionary:
 	_status_label = _status_line(root, 664.0)
 
 	var fields: Array = []
-	fields.append(_hook_field(root, list, 0, _server_url, false, 100, func(t: String) -> void: _server_url = t.strip_edges()))
+	fields.append(_hook_field(root, list, 0, _server_url, false, 100, func(t: String) -> void: _server_url = Account.clean_url(t)))
 	if not signed:
 		fields.append(_hook_field(root, list, 1, _user_name, false, 16, func(t: String) -> void: _user_name = t.strip_edges()))
 		fields.append(_hook_field(root, list, 2, "", true, 64, func(t: String) -> void: _user_pass = t))
@@ -596,8 +596,10 @@ func _on_matchmake_pressed() -> void:
 
 
 func _on_leaderboard_pressed() -> void:
-	var url := _server_url.strip_edges().trim_suffix("/")
-	_push("board")
+	var url := Account.clean_url(_server_url)
+	await _push("board")                       # the page (and its label) exists only after the transition
+	if _board_label == null:
+		return
 	_board_label.text = "..."
 	if _board_http.request(url + "/stats/leaderboard?top=10") != OK:
 		_board_label.text = "The server cannot be reached."

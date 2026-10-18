@@ -14,7 +14,15 @@ var token: String = ""
 var api: String = ""
 
 
+## Run from the Godot editor (several test windows share one user folder), the session stays in memory
+## so each window keeps its own account and signing out in one cannot affect another.
+static func _persists() -> bool:
+	return not OS.has_feature("editor")
+
+
 func _ready() -> void:
+	if not _persists():
+		return
 	var cfg := ConfigFile.new()
 	if cfg.load(PATH) == OK:
 		username = str(cfg.get_value("session", "username", ""))
@@ -130,11 +138,20 @@ func _error_text(code: int, data) -> String:
 
 
 func _clean(url: String) -> String:
-	var u := url.strip_edges().trim_suffix("/")
+	return clean_url(url)
+
+
+## Tidies a pasted server address: spaces, trailing "/" or "." (e.g. copied from the end of a sentence).
+static func clean_url(url: String) -> String:
+	var u := url.strip_edges()
+	while u.ends_with("/") or u.ends_with(".") or u.ends_with(","):
+		u = u.left(u.length() - 1)
 	return u if not u.is_empty() else "http://127.0.0.1:8000"
 
 
 func _save() -> void:
+	if not _persists():
+		return
 	var cfg := ConfigFile.new()
 	cfg.set_value("session", "username", username)
 	cfg.set_value("session", "token", token)

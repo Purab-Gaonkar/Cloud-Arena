@@ -23,7 +23,7 @@ COPY scripts ./scripts
 COPY assets ./assets
 # Bake Godot's import cache so servers start in about a second instead of re-importing assets
 RUN godot --headless --path /game --import || true
-RUN chown -R cloudapp:cloudapp /game
+RUN chown -R cloudapp:cloudapp /game /home/cloudapp
 
 # Room manager
 WORKDIR /srv
@@ -31,6 +31,8 @@ COPY backend/game_server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/game_server/server.py .
 
+# Godot writes its user:// data (logs, caches) here; /tmp is always writable on Cloud Run
+ENV XDG_DATA_HOME=/tmp/godot/data XDG_CONFIG_HOME=/tmp/godot/config XDG_CACHE_HOME=/tmp/godot/cache
 ENV GODOT_BIN=/usr/local/bin/godot     GODOT_PROJECT=/game     PORT=8765
 EXPOSE 8765
 USER cloudapp
