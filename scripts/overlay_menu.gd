@@ -15,6 +15,10 @@ var _hint: Label
 var _stats_box: VBoxContainer
 var _moves: Label
 var online: bool = false   # online match: never pauses the tree, rematch needs both players
+var _buttons: HBoxContainer
+var _btn_main: Button
+var _btn_leave: Button
+var _rematch_sent: bool = false
 
 
 func _ready() -> void:
@@ -60,6 +64,22 @@ func _ready() -> void:
 	_hint = UiStyle.label("", 22, UiStyle.TEXT, false, 6)
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(_hint)
+
+	_buttons = HBoxContainer.new()
+	_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	_buttons.add_theme_constant_override("separation", 24)
+	_buttons.visible = false
+	box.add_child(_buttons)
+	_btn_main = UiStyle.button("REMATCH", UiStyle.GOLD, 56.0)
+	_btn_main.custom_minimum_size = Vector2(260, 56)
+	_btn_main.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_btn_main.pressed.connect(_on_main_button)
+	_buttons.add_child(_btn_main)
+	_btn_leave = UiStyle.button("LEAVE", UiStyle.P2, 56.0)
+	_btn_leave.custom_minimum_size = Vector2(260, 56)
+	_btn_leave.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_btn_leave.pressed.connect(func() -> void: _leave())
+	_buttons.add_child(_btn_leave)
 
 	_moves = UiStyle.label("MOVES:  tap ATTACK x3 = combo   |   HEAVY = slow, hard hit   |   double-tap = dash (away = invulnerable backdash)   |   hitting a swing during startup = COUNTER +25%\nhold BLOCK facing your enemy = chip damage (block just before impact = PARRY)   |   ATTACK + BLOCK up close = THROW (beats blockers)   |   full meter + SUPER = finisher (0.45s telegraph - dodge it!)", 15, UiStyle.MUTED, false, 4)
 	_moves.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -108,16 +128,60 @@ func show_match_end(text: String, stats: Dictionary = {}) -> void:
 	_hint.text = "ENTER / A  Rematch        C / X  Change fighters        M / B  Main menu"
 	if online:
 		_hint.text = "ENTER / A  Rematch (needs both players)          M / B  Leave"
+		_rematch_sent = false
+		_show_buttons("REMATCH")
 	_pop()
 
 
 func hide_overlay() -> void:
 	_mode = "none"
 	_panel.visible = false
+	if _buttons:
+		_buttons.visible = false
 
 
 func _leave() -> void:
 	get_parent().online_leave()
+
+
+func _show_buttons(main_text: String) -> void:
+	_buttons.visible = main_text != ""
+	_btn_main.visible = main_text != ""
+	_btn_main.disabled = false
+	_btn_main.text = main_text
+	_btn_leave.text = "LEAVE MATCH" if main_text == "RESUME" else "LEAVE"
+
+
+func _on_main_button() -> void:
+	if _mode == "pause":
+		_set_paused(false)
+	elif _mode == "match_end":
+		_request_rematch()
+
+
+func _request_rematch() -> void:
+	if _rematch_sent:
+		return
+	_rematch_sent = true
+	_hint.text = "WAITING FOR OPPONENT TO ACCEPT..."
+	_btn_main.text = "WAITING..."
+	_btn_main.disabled = true
+	get_parent().online_request_rematch()
+
+
+## The opponent pressed Rematch first.
+func set_rematch_offer() -> void:
+	if _mode == "match_end" and not _rematch_sent:
+		_hint.text = "YOUR OPPONENT WANTS A REMATCH"
+		_sub.text = "REMATCH OFFERED"
+
+
+## The opponent left after the match: a rematch is no longer possible.
+func set_opponent_gone() -> void:
+	if _mode == "match_end":
+		_sub.text = "OPPONENT LEFT"
+		_hint.text = "The other player has left the room."
+		_btn_main.visible = false
 
 
 func _set_paused(paused: bool) -> void:
@@ -132,6 +196,7 @@ func _set_paused(paused: bool) -> void:
 	if online:
 		_hint.text = "ESC / START  Resume          M / B  Leave match"
 		_moves.visible = paused
+		_show_buttons("RESUME" if paused else "")
 	if paused:
 		_pop()
 	else:
@@ -178,7 +243,6 @@ func _online_input(event: InputEvent) -> void:
 				_leave()
 		"match_end":
 			if event.is_action_pressed("ui_accept") or event.is_action_pressed("ov_restart"):
-				_hint.text = "WAITING FOR OPPONENT TO ACCEPT..."
-				get_parent().online_request_rematch()
+				_request_rematch()
 			elif event.is_action_pressed("ov_menu") or event.is_action_pressed("ov_select") or event.is_action_pressed("ui_pause"):
 				_leave()

@@ -14,8 +14,8 @@ extends Node
 
 const DEFAULT_PORT: int = 7000
 const MAX_PLAYERS: int = 2
-const PING_INTERVAL_SEC: float = 20.0
-const MATCHMAKE_TIMEOUT_SEC: float = 50.0
+const PING_INTERVAL_SEC: float = 1.0      # keepalive (must stay well under Cloud Run's 5 min idle timeout) + latency readout
+const MATCHMAKE_TIMEOUT_SEC: float = 75.0
 const GAME_SCENE: String = "res://scenes/game.tscn"
 
 signal network_ready
@@ -39,10 +39,17 @@ var idle_timeout_sec: float = 90.0
 var player_name: String = ""
 ## One-time ticket from /match/join; presented to the game server to prove who we are.
 var join_ticket: String = ""
+## Friend rooms: "" = public matchmaking, "create" = new private room, "join" = enter match_code.
+var match_mode: String = ""
+var match_code: String = ""
+## The shareable code of the private room we are in (empty for public matches).
+var room_code: String = ""
 ## Headless bot client (load / soak testing): plays by itself.
 var bot_mode: bool = false
 
 var _ping_accum: float = 0.0
+## Smoothed round-trip time to the game server in milliseconds (0 until the first reply).
+var ping_ms: int = 0
 var _ping_active: bool = false
 var _http: HTTPRequest
 var _matchmaking: bool = false
@@ -71,7 +78,7 @@ func _ready() -> void:
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 
 	_http = HTTPRequest.new()
-	_http.timeout = 45.0
+	_http.timeout = 70.0
 	add_child(_http)
 	_http.request_completed.connect(_on_matchmake_response)
 
@@ -117,6 +124,11 @@ func _bot_sign_in_then_matchmake(url: String) -> void:
 		print("@@BOT auth_failed: ", res[1])
 		get_tree().quit(3)
 		return
+	if _args.has("create"):
+		match_mode = "create"
+	elif _args.has("code"):
+		match_mode = "join"
+		match_code = str(_args["code"])
 	matchmake(url)
 
 
@@ -190,7 +202,14 @@ func _send_ping() -> void:
 	# A tiny RPC keeps both ends (and Cloud Run / NGINX) aware the connection is live.
 	var node := get_tree().current_scene
 	if node and node.has_node("Net"):
-		node.get_node("Net").ping.rpc_id(1)
+		node.get_node("Net").ping.rpc_id(1, Time.get_ticks_msec())
+
+
+func report_pong(sent_ms: int) -> void:
+	var rtt := Time.get_ticks_msec() - sent_ms
+	if rtt < 0 or rtt > 10000:
+		return
+	ping_ms = rtt if ping_ms == 0 else int(round(lerpf(float(ping_ms), float(rtt), 0.3)))
 
 
 ## Machine-readable status line for the Python room manager (parsed from stdout).
@@ -342,8 +361,15 @@ func matchmake(url: String) -> void:
 	_mm_attempts += 1
 	matchmaking_status.emit("Looking for a match...")
 	player_name = Account.username
-	var body := JSON.stringify({"player_name": player_name})
-	var err := _http.request(api_url + "/match/join", Account.auth_headers(), HTTPClient.METHOD_POST, body)
+	var path := "/match/join"
+	var payload := {"player_name": player_name}
+	if match_mode == "create":
+		path = "/match/private"
+	elif match_mode == "join":
+		path = "/match/code"
+		payload = {"code": match_code}
+	room_code = ""
+	var err := _http.request(api_url + path, Account.auth_headers(), HTTPClient.METHOD_POST, JSON.stringify(payload))
 	if err != OK:
 		_fail_matchmaking("Could not reach the matchmaking service.")
 
@@ -362,15 +388,21 @@ func _on_matchmake_response(_result: int, code: int, _headers: PackedStringArray
 		Account.clear_session()
 		_fail_matchmaking("Please sign in again.")
 		return
-	if code != 200:
-		_fail_matchmaking("Matchmaking failed (HTTP %d)." % code)
-		return
 	var json = JSON.parse_string(body.get_string_from_utf8())
+	if code != 200:
+		var detail := ""
+		if typeof(json) == TYPE_DICTIONARY and typeof(json.get("detail")) == TYPE_STRING:
+			detail = str(json["detail"])
+		_fail_matchmaking(detail if (match_mode != "" and detail != "") else "Matchmaking failed (HTTP %d)." % code)
+		return
 	if typeof(json) != TYPE_DICTIONARY or not json.has("ws_url") or json.get("room_id") == null:
 		_fail_matchmaking("Matchmaking returned no room.")
 		return
 	var url: String = json["ws_url"]
 	join_ticket = str(json.get("ticket", ""))
+	room_code = str(json.get("code", ""))
+	if room_code != "":
+		print("@@BOT room_code ", room_code)
 	matchmaking_status.emit("Joining room %s..." % str(json["room_id"]))
 	get_tree().root.set_meta("local_mode", false)
 	if join_game(url) != OK:

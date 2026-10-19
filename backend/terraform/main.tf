@@ -109,7 +109,8 @@ resource "google_cloud_run_v2_service" "game_host" {
   template {
     scaling {
       max_instance_count = 1
-      min_instance_count = 1
+      # Host 1 is always on; the others scale to zero and are woken by the matchmaking API when needed.
+      min_instance_count = count.index == 0 ? 1 : 0
     }
     vpc_access {
       connector = google_vpc_access_connector.connector.id
@@ -228,6 +229,10 @@ resource "google_cloud_run_v2_service" "matchmaking_api" {
         name  = "FIRESTORE_PROJECT_ID"
         value = var.project_id
       }
+      env {
+        name  = "GAME_HOSTS"
+        value = join(",", [for i, n in local.game_host_names : "${n}=${replace(local.game_host_urls[i], "wss://", "https://")}"])
+      }
       resources {
         limits = {
           cpu    = "1"
@@ -245,7 +250,7 @@ resource "google_cloud_run_v2_service" "matchmaking_api" {
       }
     }
     
-    timeout = "30s"
+    timeout = "90s"   # /match/join may wait for a game host to wake up and boot a room
     max_instance_request_concurrency = 200
   }
 

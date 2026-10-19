@@ -57,6 +57,12 @@ properties/13/replication_mode = 0
 properties/14/path = NodePath(".:tint")
 properties/14/spawn = true
 properties/14/replication_mode = 0
+properties/15/path = NodePath(".:_ack_seq")
+properties/15/spawn = true
+properties/15/replication_mode = 1
+properties/16/path = NodePath(".:input_locked")
+properties/16/spawn = true
+properties/16/replication_mode = 2
 
 [node name="Player" type="CharacterBody2D"]
 script = ExtResource("1_player")

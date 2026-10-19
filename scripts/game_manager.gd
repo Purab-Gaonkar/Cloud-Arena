@@ -56,6 +56,9 @@ var _net: Node = null            # online_match.gd (RPC endpoint) when playing o
 var _is_dedicated: bool = false  # true on the headless server process
 var _status_layer: CanvasLayer = null
 var _status_label: Label = null
+var _status_dim: ColorRect = null
+var _status_note: Label = null
+var _status_leave: Button = null
 var _leaving: bool = false
 var _bot: Node = null
 var _online_info: Dictionary = {}     # server: the match description sent to clients (re-sent on reconnect)
@@ -725,7 +728,7 @@ func _register_with_server() -> void:
 	var char_id: String = root.get_meta("p1_char") if root.has_meta("p1_char") else "Fighter"
 	var pal: int = int(root.get_meta("p1_pal")) if root.has_meta("p1_pal") else 0
 	_net.register.rpc_id(1, NetworkManager.join_ticket, char_id, pal)
-	online_set_status("WAITING FOR OPPONENT")
+	online_set_status(_waiting_text())
 
 
 func _refresh_players() -> void:
@@ -745,21 +748,88 @@ func _build_status_label() -> void:
 	_status_layer = CanvasLayer.new()
 	_status_layer.layer = 9
 	add_child(_status_layer)
+	if not _is_dedicated:
+		_build_ping_label()
 	_status_label = UiStyle.label("", 54, UiStyle.GOLD, true, 12)
 	_status_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_status_layer.add_child(_status_label)
+	_status_dim = ColorRect.new()
+	_status_dim.color = Color(0.02, 0.01, 0.06, 0.62)
+	_status_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_status_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_status_dim.visible = false
+	_status_layer.add_child(_status_dim)
+	_status_layer.move_child(_status_dim, 0)
+	_status_note = UiStyle.label("", 22, UiStyle.TEXT, false, 5)
+	_status_note.set_anchors_preset(Control.PRESET_CENTER)
+	_status_note.offset_left = -400
+	_status_note.offset_right = 400
+	_status_note.offset_top = 50
+	_status_note.offset_bottom = 90
+	_status_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status_note.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_status_layer.add_child(_status_note)
+	_status_leave = UiStyle.button("LEAVE MATCH", UiStyle.P2, 52.0)
+	_status_leave.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status_leave.set_anchors_preset(Control.PRESET_CENTER)
+	_status_leave.offset_left = -130
+	_status_leave.offset_right = 130
+	_status_leave.offset_top = 120
+	_status_leave.offset_bottom = 172
+	_status_leave.visible = false
+	_status_leave.pressed.connect(func() -> void: online_leave())
+	_status_layer.add_child(_status_leave)
 	var tw := create_tween().set_loops()
 	tw.tween_property(_status_label, "modulate:a", 0.45, 0.8)
 	tw.tween_property(_status_label, "modulate:a", 1.0, 0.8)
+
+
+func _waiting_text() -> String:
+	var c: String = NetworkManager.room_code
+	return ("ROOM CODE  %s\nWAITING FOR YOUR FRIEND" % c) if c != "" else "WAITING FOR OPPONENT"
+
+
+## Small latency readout in the bottom-right corner (online clients only).
+func _build_ping_label() -> void:
+	var l := UiStyle.label("", 18, UiStyle.BONE, true, 4)
+	l.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	l.offset_left = -190
+	l.offset_right = -14
+	l.offset_top = -34
+	l.offset_bottom = -8
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_status_layer.add_child(l)
+	var timer := Timer.new()
+	timer.wait_time = 0.5
+	timer.autostart = true
+	timer.process_mode = Node.PROCESS_MODE_ALWAYS
+	timer.timeout.connect(func() -> void:
+		var ms: int = NetworkManager.ping_ms
+		if ms <= 0:
+			l.text = ""
+			return
+		l.text = "%d ms" % ms
+		l.add_theme_color_override("font_color",
+			Color(0.55, 0.85, 0.55) if ms < 80 else (Color(0.9, 0.8, 0.4) if ms < 160 else Color(0.9, 0.45, 0.4))))
+	l.add_child(timer)
 
 
 func online_set_status(text: String) -> void:
 	if _status_label:
 		_status_label.text = text + "..."
 		_status_layer.visible = true
+		# Connection problems get a dimmed screen, an explanation and a way out.
+		var trouble := text.begins_with("CONNECTION") or text.begins_with("OPPONENT DISCONNECTED")
+		if _status_dim:
+			_status_dim.visible = trouble
+			_status_note.text = ("Your match is held for 30 seconds - hang on while we reconnect you."
+				if text.begins_with("CONNECTION LOST - RECONNECTING")
+				else ("The match is paused for 30 seconds so your opponent can come back." if trouble else ""))
+			_status_leave.visible = text.begins_with("CONNECTION")
 
 
 func _on_server_lost() -> void:
@@ -857,6 +927,8 @@ func online_start_flow() -> void:
 func online_player_left(slot: int) -> void:
 	if _match_over:
 		_hud.show_announcement("OPPONENT LEFT", Color(1.0, 0.5, 0.3), 70)
+		if _net:
+			_net.net_opponent_gone.rpc()
 		return
 	_round_over = true
 	_lock_players()
@@ -926,6 +998,18 @@ func online_client_resume(info: Dictionary) -> void:
 func online_clear_status() -> void:
 	if _status_layer:
 		_status_layer.visible = false
+	if _status_dim:
+		_status_dim.visible = false
+
+
+func online_rematch_offer() -> void:
+	if _overlay:
+		_overlay.set_rematch_offer()
+
+
+func online_opponent_gone() -> void:
+	if _overlay:
+		_overlay.set_opponent_gone()
 
 
 func online_client_start(info: Dictionary) -> void:

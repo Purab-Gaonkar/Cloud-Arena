@@ -169,6 +169,23 @@ func _apply_fighter() -> void:
 
 
 ## True on peers that run the combat simulation (local game or the dedicated server).
+## ── Client-side prediction (the owning client only) ─────────────────────────────────────────────
+## The owner moves its own fighter immediately from local input and reconciles with the server using
+## input sequence numbers: the server echoes the last input it processed (_ack_seq) next to the
+## position that resulted from it, so the client can measure and absorb the difference.
+var _ack_seq: int = 0            # replicated: last input sequence the server has processed
+var _last_seq: int = 0           # server: newest sequence received
+var _seq: int = 0                # client: last sequence sent
+var _pp: Vector2 = Vector2.ZERO  # predicted position
+var _pv: Vector2 = Vector2.ZERO  # predicted velocity
+var _pred_hist: Array = []       # [{"seq": int, "pos": Vector2}, ...]
+var _pred_ack_seen: int = -1
+var _pred_freeze_until: float = 0.0     # an action was pressed: let the server drive until it answers
+var _pred_anim: String = ""             # animation shown instantly for an action the server has not confirmed yet
+var _pred_anim_until: float = 0.0
+var _vis_off: Vector2 = Vector2.ZERO    # how far the drawn sprite is from the replicated position
+var _local_block_held: bool = false
+var pred_stats: Dictionary = {"corr_sum": 0.0, "corr_max": 0.0, "n": 0, "off_sum": 0.0, "off_max": 0.0, "snaps": 0, "acks": 0, "miss": 0, "calls": 0, "inactive": 0}
 var _sprite_base: Vector2 = Vector2.ZERO
 var _smooth_off: Vector2 = Vector2.ZERO
 var _last_net_pos: Vector2 = Vector2.ZERO
@@ -176,6 +193,105 @@ var _last_net_pos: Vector2 = Vector2.ZERO
 
 func _is_sim() -> bool:
 	return local_mode or multiplayer.is_server()
+
+
+## True while an animation we started instantly (before the server confirmed the action) is still the right one.
+func _pred_covers(anim: String) -> bool:
+	return _pred_anim == anim and Time.get_ticks_msec() / 1000.0 < _pred_anim_until + 0.5
+
+
+func _is_owner_client() -> bool:
+	return not local_mode and multiplayer.has_multiplayer_peer() and not multiplayer.is_server() \
+			and multiplayer.get_unique_id() == owning_peer_id
+
+
+## Prediction only runs while the server also lets this fighter walk or jump freely.
+func _pred_active() -> bool:
+	if Time.get_ticks_msec() / 1000.0 < _pred_freeze_until:
+		return false
+	return not input_locked and current_state in [State.IDLE, State.MOVE] and health > 0
+
+
+func _predict(delta: float, move: float, jump: bool, attack: bool, block: bool, heavy: bool, special: bool, dash: int) -> void:
+	_local_block_held = block
+	var now_s := Time.get_ticks_msec() / 1000.0
+	# Actions are driven by the server: show the swing at once, then stop predicting movement until it answers.
+	if current_state in [State.IDLE, State.MOVE] and not input_locked:
+		if attack or heavy or special or dash != 0:
+			_pred_freeze_until = now_s + 0.45
+			if attack and not block:
+				_pred_anim = "attack_1"
+				_pred_anim_until = now_s + 0.5
+			elif heavy:
+				_pred_anim = "heavy"
+				_pred_anim_until = now_s + 0.5
+	if not _pred_active():
+		pred_stats["inactive"] += 1
+		_pp = position
+		_pv = velocity
+		_pred_hist.clear()
+		_pred_ack_seen = -1
+		return
+	# Same movement rules the server uses (see _ground_move / _state_move / jump in _try_start_actions).
+	var rest_y := FLOOR_Y - BODY_SIZE.y * 0.5
+	var grounded := _pp.y >= rest_y - 0.5
+	var target := 0.0 if block else move * float(_fighter["speed"])
+	var accel := MOVE_SPEED * (14.0 if grounded else 4.0)
+	_pv.x = move_toward(_pv.x, target, accel * delta)
+	if jump and grounded and not block:
+		_pv.y = float(_fighter["jump"])
+	if not grounded or _pv.y < 0.0:
+		_pv.y += GRAVITY * delta
+	_pp += _pv * delta
+	if _pp.y >= rest_y:
+		_pp.y = rest_y
+		_pv.y = 0.0
+	_pp.x = clampf(_pp.x, -ARENA_HALF_W, ARENA_HALF_W)
+	_pred_hist.append({"seq": _seq, "pos": _pp})
+	if _pred_hist.size() > 240:
+		_pred_hist.pop_front()
+	_reconcile()
+
+
+## The server echoes which input produced the position it just replicated; absorb the difference.
+func _reconcile() -> void:
+	pred_stats["calls"] += 1
+	if _ack_seq == _pred_ack_seen:
+		return
+	pred_stats["acks"] += 1
+	_pred_ack_seen = _ack_seq
+	var found := -1
+	for i in range(_pred_hist.size()):
+		if _pred_hist[i]["seq"] == _ack_seq:
+			found = i
+			break
+	if found < 0:
+		pred_stats["miss"] += 1
+		_pp = position if absf(_pp.x - position.x) > 220.0 else _pp
+		return
+	var err: Vector2 = position - (_pred_hist[found]["pos"] as Vector2)
+	pred_stats["n"] += 1
+	pred_stats["corr_sum"] += err.length()
+	pred_stats["corr_max"] = maxf(pred_stats["corr_max"], err.length())
+	pred_stats["off_sum"] += (_pp - position).length()
+	pred_stats["off_max"] = maxf(pred_stats["off_max"], (_pp - position).length())
+	if err.length() < 0.5:
+		return
+	if err.length() > 240.0:               # something big happened (knockback, teleport): trust the server
+		pred_stats["snaps"] += 1
+		_pp = position
+		_pv = velocity
+		_pred_hist.clear()
+		_pred_ack_seen = -1
+		return
+	# Small disagreements are mostly timing jitter between client and server ticks: ease them in so the
+	# fighter never shakes. Big ones are real (a jump the server refused, a push): correct them quickly.
+	var k := 0.3 if err.length() < 24.0 else (0.6 if err.length() < 80.0 else 1.0)
+	var applied := err * k
+	_pp += applied
+	for i in range(found + 1, _pred_hist.size()):
+		_pred_hist[i]["pos"] = (_pred_hist[i]["pos"] as Vector2) + applied
+	_pred_hist[found]["pos"] = (_pred_hist[found]["pos"] as Vector2) + applied
 
 
 ## Visual "on the ground" test. Remote clients never run physics, so is_on_floor() is always false
@@ -214,14 +330,15 @@ func _physics_process(delta: float) -> void:
 		# Online: the owning client only sends its inputs; the server simulates everything.
 		if multiplayer.has_multiplayer_peer() and multiplayer.get_unique_id() == owning_peer_id and not multiplayer.is_server():
 			var dash := _detect_dash_dir("move_left", "move_right")
-			send_input.rpc_id(1,
-				Input.get_axis("move_left", "move_right"),
-				Input.is_action_just_pressed("jump"),
-				Input.is_action_just_pressed("attack"),
-				Input.is_action_pressed("block"),
-				Input.is_action_just_pressed("heavy"),
-				Input.is_action_just_pressed("special"),
-				dash)
+			var mv := Input.get_axis("move_left", "move_right")
+			var jp := Input.is_action_just_pressed("jump")
+			var at := Input.is_action_just_pressed("attack")
+			var bl := Input.is_action_pressed("block")
+			var hv := Input.is_action_just_pressed("heavy")
+			var sp := Input.is_action_just_pressed("special")
+			_seq += 1
+			send_input.rpc_id(1, mv, jp, at, bl, hv, sp, dash, _seq)
+			_predict(delta, mv, jp, at, bl, hv, sp, dash)
 		if multiplayer.is_server():
 			_server_process(delta)
 
@@ -236,7 +353,7 @@ func _draw() -> void:
 	var pts := PackedVector2Array()
 	for i in range(24):
 		var a := TAU * i / 24.0
-		pts.append(Vector2(cos(a) * 46.0 * squash, FLOOR_Y - global_position.y + sin(a) * 9.0 * squash))
+		pts.append(Vector2(cos(a) * 46.0 * squash + _vis_off.x, FLOOR_Y - global_position.y + sin(a) * 9.0 * squash))
 	draw_colored_polygon(pts, Color(0, 0, 0, 0.35 * squash))
 
 
@@ -387,12 +504,13 @@ func _ai_decide(dist: float, range_px: float, opp_swinging: bool, lvl: int = 1) 
 
 
 @rpc("any_peer", "call_local", "reliable")
-func send_input(move_dir: float, jump: bool, attack: bool, block: bool = false, heavy: bool = false, special: bool = false, dash: int = 0) -> void:
+func send_input(move_dir: float, jump: bool, attack: bool, block: bool = false, heavy: bool = false, special: bool = false, dash: int = 0, seq: int = 0) -> void:
 	if not multiplayer.is_server():
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if sender != owning_peer_id and sender != 0:
 		return
+	_last_seq = maxi(_last_seq, seq)
 	if input_locked:
 		move_dir = 0.0
 		jump = false
@@ -401,13 +519,16 @@ func send_input(move_dir: float, jump: bool, attack: bool, block: bool = false, 
 		heavy = false
 		special = false
 		dash = 0
+	# Button presses are one-frame pulses. Latch them (OR) until the server's next tick consumes them, so a
+	# newer message arriving first can never wipe out an earlier press (e.g. attack + block together).
 	_input_move_dir = clampf(move_dir, -1.0, 1.0)
-	_input_jump     = jump
-	_input_attack   = attack
+	_input_jump     = _input_jump or jump
+	_input_attack   = _input_attack or attack
 	_input_block    = block
-	_input_heavy    = heavy
-	_input_special  = special
-	_input_dash     = clampi(dash, -1, 1)
+	_input_heavy    = _input_heavy or heavy
+	_input_special  = _input_special or special
+	if dash != 0:
+		_input_dash = clampi(dash, -1, 1)
 
 
 func _server_process(delta: float) -> void:
@@ -435,6 +556,7 @@ func _server_process(delta: float) -> void:
 	if current_state in [State.IDLE, State.MOVE, State.BLOCK]:
 		_face_opponent()
 	if not local_mode:
+		_ack_seq = _last_seq
 		# Network inputs are pulses: consume them so a lagging frame never repeats an action.
 		_input_attack = false
 		_input_jump = false
@@ -879,14 +1001,21 @@ func _update_visuals() -> void:
 	# Remote clients receive position in discrete network steps; absorb each step into a visual offset
 	# that eases back to zero so motion looks continuous instead of stepping.
 	if not _is_sim():
-		var step := position - _last_net_pos
-		_last_net_pos = position
-		if step.length() > 300.0:
-			_smooth_off = Vector2.ZERO
+		if _is_owner_client():
+			_vis_off = (_pp - position) if _pred_active() else Vector2.ZERO
+			if _vis_off.length() > 400.0:
+				_vis_off = Vector2.ZERO
+			_sprite.position = _sprite_base + _vis_off
 		else:
-			_smooth_off -= step
-		_smooth_off = _smooth_off.lerp(Vector2.ZERO, 1.0 - exp(-get_process_delta_time() * 14.0))
-		_sprite.position = _sprite_base + _smooth_off
+			var step := position - _last_net_pos
+			_last_net_pos = position
+			if step.length() > 300.0:
+				_smooth_off = Vector2.ZERO
+			else:
+				_smooth_off -= step
+			_smooth_off = _smooth_off.lerp(Vector2.ZERO, 1.0 - exp(-get_process_delta_time() * 14.0))
+			_vis_off = _smooth_off
+			_sprite.position = _sprite_base + _smooth_off
 	if char_id != _built_char or palette != _built_pal or tint != _built_tint:
 		_apply_fighter()
 	var entered_state := current_state != _prev_vis_state
@@ -923,12 +1052,14 @@ func _update_visuals() -> void:
 					_sprite.play(want)
 			elif _sprite.animation != want or entered_state:
 				_sprite.sprite_frames.set_animation_speed(want, float(_sprite.sprite_frames.get_frame_count(want)) / maxf(_attack_dur, 0.1))
-				_sprite.play(want)
+				if _sprite.animation != want or not _pred_covers(want):
+					_sprite.play(want)
 		State.HEAVY:
 			if _sprite.animation != "heavy" or (entered_state and not _is_sim()):
 				if not _is_sim():
 					_sprite.sprite_frames.set_animation_speed("heavy", float(_sprite.sprite_frames.get_frame_count("heavy")) / maxf(_attack_dur, 0.1))
-				_sprite.play("heavy")
+				if _sprite.animation != "heavy" or not _pred_covers("heavy"):
+					_sprite.play("heavy")
 		State.DASH:
 			if _sprite.animation != "run":
 				_sprite.play("run")
@@ -942,7 +1073,14 @@ func _update_visuals() -> void:
 			if _sprite.animation != "block":
 				_sprite.play("block")
 		_:
-			if airborne:
+			var now_s := Time.get_ticks_msec() / 1000.0
+			if _is_owner_client() and _pred_anim != "" and now_s < _pred_anim_until and not airborne:
+				if _sprite.animation != _pred_anim:
+					_sprite.play(_pred_anim)
+			elif _is_owner_client() and _local_block_held and not airborne:
+				if _sprite.animation != "block":
+					_sprite.play("block")
+			elif airborne:
 				_show_jump_frame()
 			elif current_state == State.MOVE:
 				if _sprite.animation != "run":

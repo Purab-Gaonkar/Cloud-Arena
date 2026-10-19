@@ -13,7 +13,7 @@ const Atmosphere   := preload("res://scripts/menu_atmosphere.gd")
 
 const SELECT_SCENE: String = "res://scenes/character_select.tscn"
 const GAME_TITLE: String = "CLOUD ARENA"
-const COMPACT_PAGES: Array = ["controls", "board", "credits"]
+const COMPACT_PAGES: Array = ["controls", "board", "credits", "private"]
 const LIST_TOP: float = 330.0
 
 var _title: Label
@@ -227,6 +227,7 @@ func _build_page(id: String) -> Dictionary:
 		"credits":  return _page_credits()
 		"online":   return _page_online()
 		"board":    return _page_board()
+		"private":  return _page_private()
 	push_error("Unknown menu page " + id)
 	return _page_root()
 
@@ -467,11 +468,11 @@ func _page_online() -> Dictionary:
 	var signed := Account.is_signed_in()
 	var items: Array
 	if signed:
-		items = [{"text": "Server", "value": "-"}, {"text": "Find Match"}, {"text": "Leaderboard"}, {"text": "Sign Out"}, {"text": "Back"}]
+		items = [{"text": "Server", "value": "-"}, {"text": "Find Match"}, {"text": "Private Match"}, {"text": "Leaderboard"}, {"text": "Sign Out"}, {"text": "Back"}]
 	else:
 		items = [{"text": "Server", "value": "-"}, {"text": "Name", "value": "-"}, {"text": "Password", "value": "-"},
 			{"text": "Sign In"}, {"text": "Create Account"}, {"text": "Back"}]
-	var pg := _new_page(items, 330.0 if signed else 296.0)
+	var pg := _new_page(items, 360.0 if signed else 296.0)
 	var root: Control = pg["root"]
 	var list = pg["list"]
 
@@ -502,9 +503,10 @@ func _on_online_item(i: int, fields: Array) -> void:
 	if Account.is_signed_in():
 		match i:
 			1: _on_matchmake_pressed()
-			2: _on_leaderboard_pressed()
-			3: _sign_out()
-			4: _back()
+			2: _push("private")
+			3: _on_leaderboard_pressed()
+			4: _sign_out()
+			5: _back()
 	else:
 		match i:
 			3: _submit_account(false)
@@ -580,7 +582,47 @@ func _page_board() -> Dictionary:
 
 # ── Online ──────────────────────────────────────────────────────────────────
 
-func _on_matchmake_pressed() -> void:
+## Friend rooms: create a private room (and share its code) or join one with a code.
+var _room_code: String = ""
+
+
+func _page_private() -> Dictionary:
+	var pg := _new_page([{"text": "Room Code", "value": "-"}, {"text": "Create Room"}, {"text": "Join Room"}, {"text": "Back"}], 300.0)
+	var root: Control = pg["root"]
+	var list = pg["list"]
+	var head := UiStyle.serif_label("Play a friend: create a room and share its code, or enter theirs.", 22, UiStyle.ASH)
+	head.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	head.offset_left = -420
+	head.offset_right = 420
+	head.offset_top = 258
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(head)
+	_status_label = _status_line(root, 664.0)
+	var field := _hook_field(root, list, 0, _room_code, false, 8, func(t: String) -> void: _room_code = t.strip_edges().to_upper())
+	list.activated.connect(func(i: int) -> void: _on_private_item(i, field))
+	return pg
+
+
+func _on_private_item(i: int, field: LineEdit) -> void:
+	match i:
+		0:
+			field.grab_focus()
+			field.caret_column = field.text.length()
+		1:
+			_on_matchmake_pressed("create")
+		2:
+			if _room_code.length() < 3:
+				_status_label.text = "Enter your friend's room code first."
+				AudioManager.play("ui_error")
+			else:
+				_on_matchmake_pressed("join", _room_code)
+		3:
+			_back()
+
+
+func _on_matchmake_pressed(mode: String = "", code: String = "") -> void:
+	NetworkManager.match_mode = mode
+	NetworkManager.match_code = code
 	var url := _server_url.strip_edges()
 	if url.is_empty():
 		url = "http://127.0.0.1:8000"

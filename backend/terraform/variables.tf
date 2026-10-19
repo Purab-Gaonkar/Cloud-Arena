@@ -10,9 +10,9 @@ variable "region" {
 }
 
 variable "game_host_count" {
-  description = "Number of game host services (each runs up to var.rooms_per_host matches at once)"
+  description = "Maximum number of game host services. Host 1 is always on, the rest scale to zero and are started on demand (each runs up to var.rooms_per_host matches at once)"
   type        = number
-  default     = 1
+  default     = 3
 }
 
 variable "rooms_per_host" {

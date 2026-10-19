@@ -47,6 +47,7 @@ from websockets.asyncio.client import connect as ws_connect
 from websockets.asyncio.server import serve as ws_serve
 
 # ── Configuration ────────────────────────────────────────────────────────────
+DEBUG_LATENCY_MS = float(os.getenv("DEBUG_LATENCY_MS", "0"))   # test only: artificial one-way delay in the relay
 REDIS_URL      = os.getenv("REDIS_URL") or f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}"
 PORT           = int(os.getenv("PORT", "8765"))
 SERVER_ID      = os.getenv("SERVER_ID", uuid.uuid4().hex[:8])
@@ -139,11 +140,17 @@ class Manager:
                     elif loop.time() - room.stale_since > 25:
                         await self.redis.hset(f"room:{room.room_id}", "reserved", room.players)
                         await self.redis.lrem("queue:matchmaking", 0, room.room_id)
-                        await self.redis.lpush("queue:matchmaking", room.room_id)
+                        await self._enqueue(room.room_id)
                         room.stale_since = None
                         log("info", "reservations_released", room=room.room_id, players=room.players)
                 except Exception as exc:
                     log("warn", "reconcile_failed", error=str(exc))
+
+    async def _enqueue(self, room_id: str) -> None:
+        """Offer a room to public matchmaking, unless it is a private (friend) room."""
+        if await self.redis.hget(f"room:{room_id}", "private") == "1":
+            return
+        await self.redis.lpush("queue:matchmaking", room_id)
 
     async def create_requests(self) -> None:
         """Rooms the matchmaking API asked this host to start."""
@@ -220,7 +227,7 @@ class Manager:
             await self.publish_room(room)
             reserved = int(await self.redis.hget(f"room:{room.room_id}", "reserved") or 0)
             if reserved < 2:
-                await self.redis.lpush("queue:matchmaking", room.room_id)
+                await self._enqueue(room.room_id)
         elif name == "player_joined":
             room.players = int(ev.get("count", room.players))
             room.status = "waiting" if room.players < 2 else "full"
@@ -283,8 +290,30 @@ class Manager:
             async with ws_connect(f"ws://127.0.0.1:{room.port}", compression=None,
                                   open_timeout=5, max_size=None, ping_interval=None) as up:
                 async def pump(src, dst):
-                    async for msg in src:
-                        await dst.send(msg)
+                    if DEBUG_LATENCY_MS <= 0:
+                        async for msg in src:
+                            await dst.send(msg)
+                        return
+                    # Debug only: delay every message by DEBUG_LATENCY_MS while keeping order and throughput.
+                    queue: asyncio.Queue = asyncio.Queue()
+                    loop = asyncio.get_running_loop()
+
+                    async def feed():
+                        async for msg in src:
+                            queue.put_nowait((loop.time() + DEBUG_LATENCY_MS / 1000.0, msg))
+                        queue.put_nowait((0.0, None))
+                    feeder = asyncio.create_task(feed())
+                    try:
+                        while True:
+                            due, msg = await queue.get()
+                            if msg is None:
+                                break
+                            wait = due - loop.time()
+                            if wait > 0:
+                                await asyncio.sleep(wait)
+                            await dst.send(msg)
+                    finally:
+                        feeder.cancel()
                 t1 = asyncio.create_task(pump(ws, up))
                 t2 = asyncio.create_task(pump(up, ws))
                 done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)

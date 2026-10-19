@@ -193,7 +193,11 @@ func _begin_match() -> void:
 func request_rematch() -> void:
 	if not is_server_role or not gm._match_over:
 		return
-	_rematch_votes[multiplayer.get_remote_sender_id()] = true
+	var voter := multiplayer.get_remote_sender_id()
+	_rematch_votes[voter] = true
+	for other in regs.keys():
+		if other != voter and not _rematch_votes.has(other):
+			net_rematch_offer.rpc_id(other)
 	if _rematch_votes.size() >= 2 and regs.size() == 2:
 		_rematch_votes.clear()
 		net_rematch.rpc()
@@ -201,15 +205,21 @@ func request_rematch() -> void:
 
 
 @rpc("any_peer", "call_remote", "unreliable")
-func ping() -> void:
-	pass
+func ping(sent_ms: int = 0) -> void:
+	if is_server_role and sent_ms != 0:
+		pong.rpc_id(multiplayer.get_remote_sender_id(), sent_ms)    # echo for the client's latency readout
+
+
+@rpc("authority", "call_remote", "unreliable")
+func pong(sent_ms: int) -> void:
+	NetworkManager.report_pong(sent_ms)
 
 
 # ── Server -> clients ───────────────────────────────────────────────────────
 
 @rpc("authority", "call_remote", "reliable")
 func net_waiting() -> void:
-	gm.online_set_status("WAITING FOR OPPONENT")
+	gm.online_set_status(gm._waiting_text())
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -230,6 +240,16 @@ func net_status(text: String) -> void:
 @rpc("authority", "call_remote", "reliable")
 func net_status_clear() -> void:
 	gm.online_clear_status()
+
+
+@rpc("authority", "call_remote", "reliable")
+func net_rematch_offer() -> void:
+	gm.online_rematch_offer()
+
+
+@rpc("authority", "call_remote", "reliable")
+func net_opponent_gone() -> void:
+	gm.online_opponent_gone()
 
 
 @rpc("authority", "call_remote", "reliable")

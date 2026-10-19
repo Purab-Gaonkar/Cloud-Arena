@@ -24,6 +24,7 @@ import json
 import os
 import re
 import secrets
+import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -43,6 +44,14 @@ OPEN_STATES         = ("ready", "waiting")
 
 # Shared secret between this API and the Godot game servers (they redeem join tickets and report results).
 SERVER_KEY          = os.getenv("SERVER_KEY", "")
+
+# Game-host autoscaling. GAME_HOSTS = "id=https://url,id=https://url": every host the deployment can use.
+# Hosts beyond the first scale to zero when idle; the API wakes one (a plain GET /health starts the
+# instance, which then registers itself in Redis) when free room capacity runs low.
+GAME_HOSTS: dict = dict(pair.split("=", 1) for pair in os.getenv("GAME_HOSTS", "").split(",") if "=" in pair)
+WAKE_WHEN_FREE_BELOW = int(os.getenv("WAKE_WHEN_FREE_BELOW", "3"))    # free room slots across live hosts
+HOST_WAKE_WAIT_S     = float(os.getenv("HOST_WAKE_WAIT_S", "20"))
+_woken_at: dict = {}
 SESSION_TTL_S       = int(os.getenv("SESSION_TTL_DAYS", "30")) * 86400
 TICKET_TTL_S        = 120
 MAX_LOGIN_FAILS     = 8          # per account per 15 minutes
@@ -60,7 +69,7 @@ def _background(coro) -> None:
         try:
             await coro
         except Exception as exc:  # noqa: BLE001
-            print(json.dumps({"level": "error", "msg": "firestore write failed", "error": str(exc)}), flush=True)
+            print(json.dumps({"level": "error", "msg": "background task failed", "error": str(exc)}), flush=True)
     task = asyncio.create_task(run())
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
@@ -115,6 +124,10 @@ class MatchResult(BaseModel):
     winner_name: str
     loser_name:  str | None = None
     duration_s:  float
+
+
+class JoinCode(BaseModel):
+    code: str = Field(min_length=3, max_length=8)
 
 
 class TicketRedeem(BaseModel):
@@ -333,18 +346,70 @@ async def _join_creating_room(username: str) -> dict | None:
     return None
 
 
-async def _create_room(username: str) -> dict:
+def _hit(url: str) -> None:
+    try:
+        urllib.request.urlopen(url.rstrip("/") + "/health", timeout=45).read()
+    except Exception:  # noqa: BLE001 - the request only needs to start the instance
+        pass
+
+
+async def _free_capacity() -> int:
+    free = 0
+    for sid in await redis_client.smembers("servers"):
+        if await redis_client.exists(f"server:{sid}:health"):
+            info = await redis_client.hgetall(f"server:{sid}:info")
+            free += max(0, int(info.get("capacity", 0)) - int(info.get("load", 0)))
+    return free
+
+
+async def _ensure_capacity(force: bool = False) -> bool:
+    """Start one more game host when free room slots run low. Returns True if a wake-up was sent."""
+    if not GAME_HOSTS:
+        return False
+    if not force and await _free_capacity() >= WAKE_WHEN_FREE_BELOW:
+        return False
+    now = asyncio.get_running_loop().time()
+    for sid, url in GAME_HOSTS.items():
+        if await redis_client.exists(f"server:{sid}:health"):
+            continue                                      # already running
+        if now - _woken_at.get(sid, -1e9) < 60:
+            return True                                   # a wake-up for this host is already under way
+        _woken_at[sid] = now
+        print(json.dumps({"level": "info", "msg": "waking_game_host", "server_id": sid}), flush=True)
+        threading_start(url)
+        return True
+    return False
+
+
+def threading_start(url: str) -> None:
+    """Fire the wake-up request without waiting for the instance to finish booting."""
+    import threading
+    threading.Thread(target=_hit, args=(url,), daemon=True).start()
+
+
+ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"      # no 0/O/1/I to avoid misreading
+
+
+async def _create_room(username: str, private: bool = False) -> dict:
     server_id = await _pick_server()
+    if server_id is None and GAME_HOSTS:
+        await _ensure_capacity(force=True)               # all hosts full or asleep: start another and wait
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + HOST_WAKE_WAIT_S
+        while server_id is None and loop.time() < deadline:
+            await asyncio.sleep(0.5)
+            server_id = await _pick_server()
     if server_id is None:
         raise HTTPException(status_code=503, detail="No game servers available")
     room_id = uuid.uuid4().hex[:8]
     await redis_client.hset(f"room:{room_id}", mapping={
         "room_id": room_id, "server_id": server_id, "status": "creating", "reserved": 1, "player_cnt": 0,
-        "created_at": datetime.now(timezone.utc).isoformat()})
+        "private": "1" if private else "0", "created_at": datetime.now(timezone.utc).isoformat()})
     await redis_client.expire(f"room:{room_id}", 120)
     await redis_client.sadd(f"room:{room_id}:users", username)
     await redis_client.expire(f"room:{room_id}:users", 3600)
-    await redis_client.lpush("queue:creating", room_id)
+    if not private:
+        await redis_client.lpush("queue:creating", room_id)
     await redis_client.lpush(f"queue:create:{server_id}", room_id)
     try:
         return await _wait_room_open(room_id)
@@ -381,7 +446,43 @@ async def join_match(req: JoinRequest, username: str = Depends(current_user)):
             await redis_client.sadd(f"room:{req.preferred_room}:users", username)
             return await _issue_ticket(username, _room_response(meta))
     room = await _claim_open_room(username) or await _join_creating_room(username) or await _create_room(username)
+    _background(_ensure_capacity())                      # keep spare capacity: wake another host if running low
     return await _issue_ticket(username, room)
+
+
+@app.post("/match/private")
+async def create_private_match(username: str = Depends(current_user)):
+    """Start a private room for friends; the response carries a short room code to share."""
+    room = await _create_room(username, private=True)
+    code = ""
+    for _ in range(10):
+        code = "".join(secrets.choice(ROOM_CODE_CHARS) for _ in range(5))
+        if await redis_client.set(f"code:{code}", room["room_id"], ex=7200, nx=True):
+            break
+    resp = await _issue_ticket(username, room)
+    resp["code"] = code
+    return resp
+
+
+@app.post("/match/code")
+async def join_by_code(req: JoinCode, username: str = Depends(current_user)):
+    """Join a friend's private room using its code."""
+    code = req.code.strip().upper()
+    room_id = await redis_client.get(f"code:{code}")
+    meta = await redis_client.hgetall(f"room:{room_id}") if room_id else None
+    if not meta or meta.get("status") not in OPEN_STATES:
+        raise HTTPException(status_code=404, detail="No open room with that code")
+    if await redis_client.sismember(f"room:{room_id}:users", username):
+        raise HTTPException(status_code=409, detail="You are already in that room")
+    reserved = await redis_client.hincrby(f"room:{room_id}", "reserved", 1)
+    if reserved > 2:
+        await redis_client.hincrby(f"room:{room_id}", "reserved", -1)
+        raise HTTPException(status_code=409, detail="That room is full")
+    await redis_client.sadd(f"room:{room_id}:users", username)
+    await redis_client.expire(f"room:{room_id}:users", 3600)
+    resp = await _issue_ticket(username, _room_response(meta))
+    resp["code"] = code
+    return resp
 
 
 @app.post("/match/rejoin")
