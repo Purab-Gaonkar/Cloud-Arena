@@ -109,8 +109,8 @@ resource "google_cloud_run_v2_service" "game_host" {
   template {
     scaling {
       max_instance_count = 1
-      # Host 1 is always on; the others scale to zero and are woken by the matchmaking API when needed.
-      min_instance_count = count.index == 0 ? 1 : 0
+      # The first var.game_hosts_always_on hosts stay on; the others scale to zero and are woken by the matchmaking API when needed.
+      min_instance_count = count.index < var.game_hosts_always_on ? 1 : 0
     }
     vpc_access {
       connector = google_vpc_access_connector.connector.id
@@ -203,7 +203,7 @@ resource "google_cloud_run_v2_service" "matchmaking_api" {
 
   template {
     scaling {
-      max_instance_count = 5
+      max_instance_count = 1
       min_instance_count = 1
     }
     vpc_access {

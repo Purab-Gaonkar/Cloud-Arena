@@ -399,7 +399,7 @@ func _page_credits() -> Dictionary:
 		["Music", "wipics  -  Kistol  -  pmiller  -  Xythe / mutkanto  (OpenGameArt)"],
 		["Sound", "Kenney.nl  (CC0)"],
 		["Engine", "Godot"],
-		["Play testers", "Adam  -  Samuel"],
+		["Play testers", "Adam Rodrigues  -  Samuel D'Souza  -  Rudresh Gaonkar"],
 	]
 	for i in range(lines.size()):
 		var h := UiStyle.serif_label(lines[i][0], 17, Color(0.5, 0.54, 0.68))
