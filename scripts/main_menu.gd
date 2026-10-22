@@ -184,7 +184,7 @@ func _show_page(id: String) -> void:
 		pg["list"].active = true
 		pg["list"].set_focus(0, false)
 	_busy = false
-	if id == "online" and Account.is_signed_in():
+	if id == "online" and Account.is_signed_in() and not (_server_url + GameSettings.online_api).is_empty():
 		Account.verify(_server_url if _server_url != "" else GameSettings.online_api)
 
 
@@ -399,6 +399,7 @@ func _page_credits() -> Dictionary:
 		["Music", "wipics  -  Kistol  -  pmiller  -  Xythe / mutkanto  (OpenGameArt)"],
 		["Sound", "Kenney.nl  (CC0)"],
 		["Engine", "Godot"],
+		["Play testers", "Adam  -  Samuel"],
 	]
 	for i in range(lines.size()):
 		var h := UiStyle.serif_label(lines[i][0], 17, Color(0.5, 0.54, 0.68))
@@ -486,7 +487,7 @@ func _page_online() -> Dictionary:
 	_status_label = _status_line(root, 664.0)
 
 	var fields: Array = []
-	fields.append(_hook_field(root, list, 0, _server_url, false, 100, func(t: String) -> void: _server_url = Account.clean_url(t)))
+	fields.append(_hook_field(root, list, 0, _server_url, false, 100, func(t: String) -> void: _server_url = Account.clean_url(t) if not t.strip_edges().is_empty() else ""))
 	if not signed:
 		fields.append(_hook_field(root, list, 1, _user_name, false, 16, func(t: String) -> void: _user_name = t.strip_edges()))
 		fields.append(_hook_field(root, list, 2, "", true, 64, func(t: String) -> void: _user_pass = t))
@@ -518,6 +519,8 @@ func _submit_account(create: bool) -> void:
 	if _auth_busy:
 		return
 	var problem := Account.validate(_user_name, _user_pass)
+	if _server_url.is_empty():
+		problem = "Enter the server address first."
 	if not problem.is_empty():
 		_status_label.text = problem
 		AudioManager.play("ui_error")
@@ -625,7 +628,10 @@ func _on_matchmake_pressed(mode: String = "", code: String = "") -> void:
 	NetworkManager.match_code = code
 	var url := _server_url.strip_edges()
 	if url.is_empty():
-		url = "http://127.0.0.1:8000"
+		if _status_label:
+			_status_label.text = "Enter the server address first."
+		AudioManager.play("ui_error")
+		return
 	GameSettings.set_online(url, "")
 	NetworkManager.player_name = Account.username
 	var root := get_tree().root
@@ -638,6 +644,11 @@ func _on_matchmake_pressed(mode: String = "", code: String = "") -> void:
 
 
 func _on_leaderboard_pressed() -> void:
+	if _server_url.is_empty():
+		if _status_label:
+			_status_label.text = "Enter the server address first."
+		AudioManager.play("ui_error")
+		return
 	var url := Account.clean_url(_server_url)
 	await _push("board")                       # the page (and its label) exists only after the transition
 	if _board_label == null:
